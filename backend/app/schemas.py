@@ -1,5 +1,5 @@
-from typing import List, Optional
 from pydantic import BaseModel, EmailStr
+from typing import List, Optional
 
 
 class LoginRequest(BaseModel):
@@ -11,10 +11,11 @@ class RegisterRequest(BaseModel):
     name: str
     email: EmailStr
     password: str
-    phone: Optional[str] = ""
+    role: str
+    bio: Optional[str] = ""
 
 
-class AnswerItem(BaseModel):
+class TestAnswerItem(BaseModel):
     question_id: int
     answer: str
 
@@ -22,8 +23,8 @@ class AnswerItem(BaseModel):
 class TestSubmit(BaseModel):
     trainee_id: int
     course_id: int
-    answers: List[AnswerItem]
     test_type: str
+    answers: List[TestAnswerItem]
 
 
 class BookingRequest(BaseModel):
@@ -33,6 +34,11 @@ class BookingRequest(BaseModel):
     topic_id: int
 
 
-class TrainerProfileUpdate(BaseModel):
-    name: Optional[str] = None
-    bio: Optional[str] = None
+class SlotCreate(BaseModel):
+    start_time: str
+    end_time: str
+
+
+class ProfileUpdate(BaseModel):
+    name: str
+    bio: Optional[str] = ""
