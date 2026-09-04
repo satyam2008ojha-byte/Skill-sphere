@@ -1,22 +1,21 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 
-const API =
-  "https://skillsphere-backend-dcg2.onrender.com";
+const API_BASE = "https://skillsphere-backend-dcg2.onrender.com";
 
 type User = {
   id: number;
   name: string;
   email: string;
-  role: "trainee" | "trainer" | "admin";
+  role: string;
   bio?: string;
 };
 
 type Course = {
   id: number;
   title: string;
-  description: string;
-  topic_count: number;
-  question_count: number;
+  description?: string;
+  topic_count?: number;
+  question_count?: number;
 };
 
 type Topic = {
@@ -37,9 +36,9 @@ type Trainer = {
   id: number;
   name: string;
   email: string;
-  bio: string;
-  expertise?: Topic[];
+  bio?: string;
   available_slots?: number;
+  recommended?: boolean;
 };
 
 type Slot = {
@@ -58,11 +57,11 @@ type Booking = {
   topic_id: number;
   start_time: string;
   end_time: string;
-  lecture_id: number | null;
-  lecture_status: string | null;
+  lecture_id?: number;
+  lecture_status?: string;
 };
 
-type AttemptResult = {
+type TestResult = {
   attempt_id: number;
   course_id: number;
   test_type: string;
@@ -78,59 +77,54 @@ type AttemptResult = {
     is_correct: boolean;
   }[];
   topic_analysis: {
-    topic_id: number;
     topic: string;
     percentage: number;
-    weak: boolean;
   }[];
   weak_topics: {
     topic_id: number;
     topic: string;
     percentage: number;
-    weak: boolean;
   }[];
 };
 
-type Page =
-  | "dashboard"
-  | "courses"
-  | "test"
-  | "result"
-  | "teachers"
-  | "teacher"
-  | "booking"
-  | "bookings"
-  | "profile"
-  | "settings"
-  | "trainer-dashboard"
-  | "student-progress"
-  | "admin";
+function text(value: unknown, fallback = "") {
+  return value === undefined || value === null
+    ? fallback
+    : String(value);
+}
 
+function initials(value: unknown) {
+  const name = text(value, "User").trim();
 
-// ============================================================
-// API HELPER
-// ============================================================
+  if (!name) return "U";
 
-async function api(
-  path: string,
+  return name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((x) => x.charAt(0).toUpperCase())
+    .join("");
+}
+
+async function api<T>(
+  endpoint: string,
   options: RequestInit = {}
-) {
-  const response = await fetch(`${API}${path}`, {
+): Promise<T> {
+  const response = await fetch(`${API_BASE}${endpoint}`, {
+    ...options,
     headers: {
       "Content-Type": "application/json",
       ...(options.headers || {}),
     },
-    ...options,
   });
 
-  const text = await response.text();
+  const body = await response.text();
 
-  let data: any = {};
+  let data: any = null;
 
   try {
-    data = text ? JSON.parse(text) : {};
+    data = body ? JSON.parse(body) : null;
   } catch {
-    data = {};
+    data = body;
   }
 
   if (!response.ok) {
@@ -141,59 +135,44 @@ async function api(
     );
   }
 
-  return data;
+  return data as T;
 }
-
-
-// ============================================================
-// SMALL UI COMPONENTS
-// ============================================================
 
 function Button({
   children,
   onClick,
-  secondary = false,
-  danger = false,
+  variant = "primary",
   disabled = false,
   type = "button",
 }: {
   children: React.ReactNode;
   onClick?: () => void;
-  secondary?: boolean;
-  danger?: boolean;
+  variant?: "primary" | "secondary" | "danger" | "ghost";
   disabled?: boolean;
   type?: "button" | "submit";
 }) {
-  let cls =
-    "px-4 py-2.5 rounded-xl font-semibold transition ";
-
-  if (danger) {
-    cls +=
-      "bg-red-600 text-white hover:bg-red-700 ";
-  } else if (secondary) {
-    cls +=
-      "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 ";
-  } else {
-    cls +=
-      "bg-indigo-600 text-white hover:bg-indigo-700 ";
-  }
-
-  if (disabled) {
-    cls += "opacity-50 cursor-not-allowed ";
-  }
+  const style = {
+    primary:
+      "bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-100",
+    secondary:
+      "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50",
+    danger:
+      "bg-red-50 border border-red-200 text-red-600 hover:bg-red-100",
+    ghost:
+      "bg-transparent text-slate-600 hover:bg-slate-100",
+  };
 
   return (
     <button
       type={type}
-      disabled={disabled}
       onClick={onClick}
-      className={cls}
+      disabled={disabled}
+      className={`rounded-xl px-4 py-2.5 font-semibold transition ${style[variant]}`}
     >
       {children}
     </button>
   );
 }
-
 
 function Card({
   children,
@@ -204,147 +183,218 @@ function Card({
 }) {
   return (
     <div
-      className={`bg-white border border-slate-200 rounded-2xl shadow-sm ${className}`}
+      className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${className}`}
     >
       {children}
     </div>
   );
 }
 
-
-function Spinner() {
+function Loading() {
   return (
-    <div className="flex justify-center items-center py-12">
-      <div className="h-8 w-8 rounded-full border-4 border-slate-200 border-t-indigo-600 animate-spin" />
+    <div className="flex min-h-[300px] items-center justify-center">
+      <div className="text-center">
+        <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-indigo-600" />
+        <p className="mt-3 text-slate-500">Loading...</p>
+      </div>
     </div>
   );
 }
 
-
-function InitialAvatar({
-  name,
-  size = "normal",
-}: {
-  name?: string;
-  size?: "normal" | "large";
-}) {
-  const safeName =
-    typeof name === "string" && name.trim()
-      ? name.trim()
-      : "User";
-
-  const firstLetter =
-    safeName.length > 0
-      ? safeName.charAt(0).toUpperCase()
-      : "U";
+function ErrorBox({ message }: { message: string }) {
+  if (!message) return null;
 
   return (
-    <div
-      className={`rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold ${
-        size === "large"
-          ? "w-20 h-20 text-3xl"
-          : "w-10 h-10 text-lg"
+    <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      {message}
+    </div>
+  );
+}
+
+function Input({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+  required = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  type?: string;
+  required?: boolean;
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-sm font-semibold text-slate-700">
+        {label}
+      </label>
+
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        required={required}
+        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50"
+      />
+    </div>
+  );
+}
+
+function NavButton({
+  children,
+  active,
+  onClick,
+}: {
+  children: React.ReactNode;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold ${
+        active
+          ? "bg-indigo-50 text-indigo-700"
+          : "text-slate-500 hover:bg-slate-50"
       }`}
     >
-      {firstLetter}
+      {children}
+    </button>
+  );
+}
+
+/* =========================================================
+   MAIN APP
+========================================================= */
+
+export default function App() {
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const saved = localStorage.getItem("skillsphere_user");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [page, setPage] = useState("dashboard");
+  const [error, setError] = useState("");
+
+  function loginUser(newUser: User) {
+    setUser(newUser);
+    localStorage.setItem(
+      "skillsphere_user",
+      JSON.stringify(newUser)
+    );
+    setPage("dashboard");
+  }
+
+  function logout() {
+    localStorage.removeItem("skillsphere_user");
+    setUser(null);
+    setPage("dashboard");
+  }
+
+  if (!user) {
+    return <AuthScreen onLogin={loginUser} />;
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <Header
+        user={user}
+        page={page}
+        setPage={setPage}
+        logout={logout}
+      />
+
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        {error && (
+          <ErrorBox
+            message={error}
+          />
+        )}
+
+        {page === "dashboard" && (
+          <Dashboard
+            user={user}
+            setPage={setPage}
+            setError={setError}
+          />
+        )}
+
+        {page === "courses" && (
+          <CoursesPage
+            user={user}
+            setPage={setPage}
+            setError={setError}
+          />
+        )}
+
+        {page === "teachers" && (
+          <TeachersPage
+            user={user}
+            setError={setError}
+          />
+        )}
+
+        {page === "bookings" && (
+          <BookingsPage
+            user={user}
+            setError={setError}
+          />
+        )}
+
+        {page === "progress" && (
+          <ProgressPage
+            user={user}
+            setError={setError}
+          />
+        )}
+
+        {page === "profile" && (
+          <ProfilePage
+            user={user}
+            setUser={setUser}
+            setError={setError}
+          />
+        )}
+
+        {page === "settings" && (
+          <SettingsPage
+            user={user}
+            setError={setError}
+          />
+        )}
+
+        {page === "trainer-dashboard" &&
+          user.role === "trainer" && (
+            <TrainerDashboard
+              user={user}
+              setError={setError}
+            />
+          )}
+
+        {page === "admin-dashboard" &&
+          user.role === "admin" && (
+            <AdminDashboard
+              setError={setError}
+            />
+          )}
+      </main>
     </div>
   );
 }
 
+/* =========================================================
+   AUTH
+========================================================= */
 
-// ============================================================
-// HEADER
-// ============================================================
-
-function Header({
-  user,
-  onNavigate,
-  onLogout,
-}: {
-  user: User;
-  onNavigate: (page: Page) => void;
-  onLogout: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-
-  const safeName = user?.name || "User";
-
-  return (
-    <header className="sticky top-0 z-50 bg-white border-b border-slate-200">
-      <div className="max-w-7xl mx-auto px-4 md:px-6 h-16 flex items-center justify-between">
-
-        <button
-          onClick={() => onNavigate("dashboard")}
-          className="text-2xl font-bold text-indigo-600"
-        >
-          SkillSphere
-        </button>
-
-        <div className="flex items-center gap-3">
-
-          <div className="hidden md:block text-right">
-            <p className="text-sm font-semibold text-slate-800">
-              {safeName}
-            </p>
-            <p className="text-xs text-slate-500 capitalize">
-              {user?.role || "user"}
-            </p>
-          </div>
-
-          <button
-            onClick={() => setOpen(!open)}
-            className="focus:outline-none"
-          >
-            <InitialAvatar name={safeName} />
-          </button>
-
-          {open && (
-            <div className="absolute right-4 top-14 w-52 bg-white border border-slate-200 rounded-xl shadow-lg p-2">
-
-              <button
-                onClick={() => {
-                  setOpen(false);
-                  onNavigate("profile");
-                }}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100"
-              >
-                👤 Profile
-              </button>
-
-              <button
-                onClick={() => {
-                  setOpen(false);
-                  onNavigate("settings");
-                }}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100"
-              >
-                ⚙️ Settings
-              </button>
-
-              <button
-                onClick={() => {
-                  setOpen(false);
-                  onLogout();
-                }}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-50 text-red-600"
-              >
-                🚪 Logout
-              </button>
-
-            </div>
-          )}
-        </div>
-      </div>
-    </header>
-  );
-}
-
-
-// ============================================================
-// AUTH PAGE
-// ============================================================
-
-function AuthPage({
+function AuthScreen({
   onLogin,
 }: {
   onLogin: (user: User) => void;
@@ -356,61 +406,52 @@ function AuthPage({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<
-    "trainee" | "trainer" | "admin"
-  >("trainee");
+  const [role, setRole] = useState("trainee");
   const [bio, setBio] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  async function submit(
-    e: React.FormEvent
-  ) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
 
     setError("");
-
-    if (!email || !password) {
-      setError("Email and password are required.");
-      return;
-    }
-
-    if (mode === "register" && !name.trim()) {
-      setError("Name is required.");
-      return;
-    }
-
     setLoading(true);
 
     try {
       if (mode === "login") {
-        const data = await api("/auth/login", {
-          method: "POST",
-          body: JSON.stringify({
-            email,
-            password,
-          }),
-        });
+        const result = await api<User>(
+          "/auth/login",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              email,
+              password,
+            }),
+          }
+        );
 
-        onLogin(data.user);
+        onLogin(result);
       } else {
-        const data = await api("/auth/register", {
-          method: "POST",
-          body: JSON.stringify({
-            name,
-            email,
-            password,
-            role,
-            bio,
-          }),
-        });
+        const result = await api<User>(
+          "/auth/register",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              name,
+              email,
+              password,
+              role,
+              bio,
+            }),
+          }
+        );
 
-        onLogin(data.user);
+        onLogin(result);
       }
     } catch (err: any) {
       setError(
-        err?.message || "Something went wrong."
+        err.message || "Something went wrong"
       );
     } finally {
       setLoading(false);
@@ -418,28 +459,32 @@ function AuthPage({
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-sky-50 flex items-center justify-center p-5">
-
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-sky-50 px-4">
       <div className="w-full max-w-md">
-
-        <div className="text-center mb-7">
-          <div className="text-4xl font-black text-indigo-600">
-            SkillSphere
+        <div className="mb-8 text-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-600 text-2xl font-black text-white">
+            S
           </div>
 
+          <h1 className="text-3xl font-black text-slate-900">
+            SkillSphere
+          </h1>
+
           <p className="mt-2 text-slate-500">
-            Learn • Assess • Detect Gaps • Improve
+            Competency Based Learning Platform
           </p>
         </div>
 
-        <Card className="p-7">
-
-          <div className="flex bg-slate-100 rounded-xl p-1 mb-6">
+        <Card className="p-6 sm:p-8">
+          <div className="mb-6 grid grid-cols-2 rounded-xl bg-slate-100 p-1">
             <button
-              onClick={() => setMode("login")}
-              className={`flex-1 py-2 rounded-lg font-semibold ${
+              onClick={() => {
+                setMode("login");
+                setError("");
+              }}
+              className={`rounded-lg py-2.5 font-bold ${
                 mode === "login"
-                  ? "bg-white shadow text-indigo-600"
+                  ? "bg-white text-indigo-600 shadow"
                   : "text-slate-500"
               }`}
             >
@@ -447,10 +492,13 @@ function AuthPage({
             </button>
 
             <button
-              onClick={() => setMode("register")}
-              className={`flex-1 py-2 rounded-lg font-semibold ${
+              onClick={() => {
+                setMode("register");
+                setError("");
+              }}
+              className={`rounded-lg py-2.5 font-bold ${
                 mode === "register"
-                  ? "bg-white shadow text-indigo-600"
+                  ? "bg-white text-indigo-600 shadow"
                   : "text-slate-500"
               }`}
             >
@@ -458,84 +506,84 @@ function AuthPage({
             </button>
           </div>
 
+          {error && (
+            <ErrorBox message={error} />
+          )}
+
           <form
             onSubmit={submit}
             className="space-y-4"
           >
-
-            {mode === "register" && (
-              <input
-                value={name}
-                onChange={(e) =>
-                  setName(e.target.value)
-                }
-                placeholder="Full name"
-                className="w-full border border-slate-300 rounded-xl px-4 py-3"
-              />
-            )}
-
-            <input
-              type="email"
-              value={email}
-              onChange={(e) =>
-                setEmail(e.target.value)
-              }
-              placeholder="Email"
-              className="w-full border border-slate-300 rounded-xl px-4 py-3"
-            />
-
-            <input
-              type="password"
-              value={password}
-              onChange={(e) =>
-                setPassword(e.target.value)
-              }
-              placeholder="Password"
-              className="w-full border border-slate-300 rounded-xl px-4 py-3"
-            />
-
             {mode === "register" && (
               <>
-                <select
-                  value={role}
-                  onChange={(e) =>
-                    setRole(
-                      e.target.value as
-                        | "trainee"
-                        | "trainer"
-                        | "admin"
-                    )
-                  }
-                  className="w-full border border-slate-300 rounded-xl px-4 py-3 bg-white"
-                >
-                  <option value="trainee">
-                    Trainee
-                  </option>
-                  <option value="trainer">
-                    Trainer
-                  </option>
-                  <option value="admin">
-                    Admin
-                  </option>
-                </select>
-
-                <textarea
-                  value={bio}
-                  onChange={(e) =>
-                    setBio(e.target.value)
-                  }
-                  placeholder="Short bio (optional)"
-                  rows={3}
-                  className="w-full border border-slate-300 rounded-xl px-4 py-3"
+                <Input
+                  label="Full Name"
+                  value={name}
+                  onChange={setName}
+                  placeholder="Enter your name"
+                  required
                 />
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">
+                    Role
+                  </label>
+
+                  <select
+                    value={role}
+                    onChange={(e) =>
+                      setRole(e.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3"
+                  >
+                    <option value="trainee">
+                      Trainee
+                    </option>
+
+                    <option value="trainer">
+                      Trainer
+                    </option>
+
+                    <option value="admin">
+                      Admin
+                    </option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">
+                    Bio
+                  </label>
+
+                  <textarea
+                    value={bio}
+                    onChange={(e) =>
+                      setBio(e.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-200 px-4 py-3"
+                    placeholder="Short bio"
+                  />
+                </div>
               </>
             )}
 
-            {error && (
-              <div className="bg-red-50 text-red-700 border border-red-200 rounded-xl p-3 text-sm">
-                {error}
-              </div>
-            )}
+            <Input
+              label="Email"
+              type="email"
+              value={email}
+              onChange={setEmail}
+              placeholder="you@example.com"
+              required
+            />
+
+            <Input
+              label="Password"
+              type="password"
+              value={password}
+              onChange={setPassword}
+              placeholder="••••••••"
+              required
+            />
 
             <Button
               type="submit"
@@ -547,311 +595,580 @@ function AuthPage({
                 ? "Login"
                 : "Create Account"}
             </Button>
-
           </form>
         </Card>
-
-        <p className="text-center text-xs text-slate-400 mt-5">
-          SkillSphere Competency-Based Learning Platform
-        </p>
-
       </div>
     </div>
   );
 }
 
+/* =========================================================
+   HEADER
+========================================================= */
 
-// ============================================================
-// TRAINEE DASHBOARD
-// ============================================================
-
-function TraineeDashboard({
+function Header({
   user,
-  onNavigate,
+  page,
+  setPage,
+  logout,
 }: {
   user: User;
-  onNavigate: (page: Page) => void;
+  page: string;
+  setPage: (page: string) => void;
+  logout: () => void;
 }) {
-  const [progress, setProgress] =
-    useState<any[]>([]);
+  const [menu, setMenu] = useState(false);
+
+  return (
+    <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
+      <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
+        <button
+          onClick={() => setPage("dashboard")}
+          className="flex items-center gap-3"
+        >
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 font-black text-white">
+            S
+          </div>
+
+          <div className="text-left">
+            <div className="font-black text-slate-900">
+              SkillSphere
+            </div>
+
+            <div className="text-xs text-slate-400">
+              Learning Platform
+            </div>
+          </div>
+        </button>
+
+        <nav className="hidden items-center gap-1 md:flex">
+          <NavButton
+            active={page === "dashboard"}
+            onClick={() => setPage("dashboard")}
+          >
+            Home
+          </NavButton>
+
+          <NavButton
+            active={page === "courses"}
+            onClick={() => setPage("courses")}
+          >
+            📚 Courses
+          </NavButton>
+
+          <NavButton
+            active={page === "teachers"}
+            onClick={() => setPage("teachers")}
+          >
+            👨‍🏫 Teachers
+          </NavButton>
+
+          <NavButton
+            active={page === "bookings"}
+            onClick={() => setPage("bookings")}
+          >
+            📅 Bookings
+          </NavButton>
+
+          <NavButton
+            active={page === "progress"}
+            onClick={() => setPage("progress")}
+          >
+            📊 Progress
+          </NavButton>
+
+          {user.role === "trainer" && (
+            <NavButton
+              active={
+                page === "trainer-dashboard"
+              }
+              onClick={() =>
+                setPage("trainer-dashboard")
+              }
+            >
+              Trainer
+            </NavButton>
+          )}
+
+          {user.role === "admin" && (
+            <NavButton
+              active={
+                page === "admin-dashboard"
+              }
+              onClick={() =>
+                setPage("admin-dashboard")
+              }
+            >
+              Admin
+            </NavButton>
+          )}
+        </nav>
+
+        <div className="relative">
+          <button
+            onClick={() => setMenu(!menu)}
+            className="flex items-center gap-2 rounded-xl p-1.5 hover:bg-slate-100"
+          >
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 font-bold text-indigo-700">
+              {initials(user.name)}
+            </div>
+
+            <div className="hidden text-left sm:block">
+              <div className="max-w-32 truncate text-sm font-bold">
+                {text(user.name, "User")}
+              </div>
+
+              <div className="text-xs capitalize text-slate-400">
+                {text(user.role, "trainee")}
+              </div>
+            </div>
+
+            <span>⌄</span>
+          </button>
+
+          {menu && (
+            <div className="absolute right-0 top-14 w-52 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+              <button
+                onClick={() => {
+                  setPage("profile");
+                  setMenu(false);
+                }}
+                className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold hover:bg-slate-50"
+              >
+                👤 Profile
+              </button>
+
+              <button
+                onClick={() => {
+                  setPage("settings");
+                  setMenu(false);
+                }}
+                className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold hover:bg-slate-50"
+              >
+                ⚙️ Settings
+              </button>
+
+              <div className="my-1 border-t" />
+
+              <button
+                onClick={logout}
+                className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-red-600 hover:bg-red-50"
+              >
+                🚪 Logout
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex gap-1 overflow-x-auto border-t px-3 py-2 md:hidden">
+        <NavButton
+          active={page === "dashboard"}
+          onClick={() => setPage("dashboard")}
+        >
+          Home
+        </NavButton>
+
+        <NavButton
+          active={page === "courses"}
+          onClick={() => setPage("courses")}
+        >
+          📚 Courses
+        </NavButton>
+
+        <NavButton
+          active={page === "teachers"}
+          onClick={() => setPage("teachers")}
+        >
+          👨‍🏫 Teachers
+        </NavButton>
+
+        <NavButton
+          active={page === "bookings"}
+          onClick={() => setPage("bookings")}
+        >
+          📅 Bookings
+        </NavButton>
+
+        <NavButton
+          active={page === "progress"}
+          onClick={() => setPage("progress")}
+        >
+          📊 Progress
+        </NavButton>
+      </div>
+    </header>
+  );
+}
+
+/* =========================================================
+   DASHBOARD
+========================================================= */
+
+function Dashboard({
+  user,
+  setPage,
+  setError,
+}: {
+  user: User;
+  setPage: (page: string) => void;
+  setError: (error: string) => void;
+}) {
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api(`/progress/${user.id}`)
-      .then(setProgress)
-      .catch(() => setProgress([]))
+    Promise.all([
+      api<Course[]>("/courses"),
+      api<Booking[]>(
+        `/bookings/trainee/${user.id}`
+      ),
+    ])
+      .then(([courseData, bookingData]) => {
+        setCourses(courseData);
+        setBookings(bookingData);
+      })
+      .catch((err) =>
+        setError(err.message)
+      )
       .finally(() => setLoading(false));
-  }, [user.id]);
+  }, [user.id, setError]);
 
-  const latest =
-    progress.length > 0
-      ? progress[0]
-      : null;
+  if (loading) return <Loading />;
 
   return (
-    <div>
+    <div className="space-y-8">
+      <section className="rounded-3xl bg-gradient-to-r from-indigo-600 to-violet-600 p-6 text-white shadow-xl sm:p-10">
+        <div className="max-w-3xl">
+          <div className="text-sm font-bold uppercase tracking-wider text-indigo-200">
+            Welcome Back
+          </div>
 
-      <div className="bg-gradient-to-r from-indigo-600 to-blue-600 rounded-3xl text-white p-7 md:p-10">
-        <p className="text-indigo-100">
-          Welcome back
-        </p>
+          <h1 className="mt-2 text-3xl font-black sm:text-4xl">
+            Hello, {text(user.name, "Learner")} 👋
+          </h1>
 
-        <h1 className="text-3xl md:text-4xl font-bold mt-1">
-          {user?.name || "Trainee"} 👋
-        </h1>
-
-        <p className="mt-3 text-indigo-100 max-w-2xl">
-          Continue your learning journey, identify
-          weak skills and connect with the right trainer.
-        </p>
-      </div>
-
-      <div className="grid md:grid-cols-2 gap-5 mt-6">
-
-        <Card
-          className="p-6 cursor-pointer hover:shadow-lg"
-        >
-          <button
-            className="text-left w-full"
-            onClick={() => onNavigate("courses")}
-          >
-            <div className="text-3xl">📚</div>
-            <h2 className="text-xl font-bold mt-3">
-              Courses
-            </h2>
-            <p className="text-slate-500 mt-1">
-              Take a diagnostic test and discover
-              your weak topics.
-            </p>
-            <span className="inline-block mt-4 text-indigo-600 font-semibold">
-              Explore Courses →
-            </span>
-          </button>
-        </Card>
-
-        <Card className="p-6">
-          <button
-            className="text-left w-full"
-            onClick={() => onNavigate("teachers")}
-          >
-            <div className="text-3xl">👨‍🏫</div>
-            <h2 className="text-xl font-bold mt-3">
-              Teachers
-            </h2>
-            <p className="text-slate-500 mt-1">
-              Directly choose a trainer, topic and
-              available lecture slot.
-            </p>
-            <span className="inline-block mt-4 text-indigo-600 font-semibold">
-              Find Teachers →
-            </span>
-          </button>
-        </Card>
-
-      </div>
-
-      <div className="grid md:grid-cols-3 gap-5 mt-6">
-
-        <Card className="p-5">
-          <p className="text-sm text-slate-500">
-            Tests Taken
+          <p className="mt-3 text-indigo-100">
+            Identify your weak topics, connect with the
+            right trainer and improve your skills.
           </p>
-          <p className="text-3xl font-bold mt-1">
-            {loading ? "..." : progress.length}
-          </p>
-        </Card>
 
-        <Card className="p-5">
-          <p className="text-sm text-slate-500">
-            Latest Score
-          </p>
-          <p className="text-3xl font-bold mt-1 text-indigo-600">
-            {loading
-              ? "..."
-              : latest
-              ? `${latest.score}%`
-              : "—"}
-          </p>
-        </Card>
-
-        <Card className="p-5">
-          <p className="text-sm text-slate-500">
-            Latest Course
-          </p>
-          <p className="text-lg font-bold mt-2">
-            {latest?.course || "No test yet"}
-          </p>
-        </Card>
-
-      </div>
-
-      <Card className="mt-6 p-6">
-        <h2 className="text-xl font-bold">
-          Your Learning Journey
-        </h2>
-
-        <div className="grid md:grid-cols-4 gap-3 mt-5">
-
-          {[
-            ["1", "Choose Course"],
-            ["2", "Take Test"],
-            ["3", "Find Skill Gap"],
-            ["4", "Learn With Trainer"],
-          ].map(([num, text]) => (
-            <div
-              key={num}
-              className="bg-slate-50 rounded-xl p-4"
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Button
+              onClick={() => setPage("courses")}
             >
-              <div className="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold">
-                {num}
-              </div>
+              📚 Explore Courses
+            </Button>
 
-              <p className="font-semibold mt-3">
-                {text}
-              </p>
-            </div>
-          ))}
-
+            <button
+              onClick={() => setPage("teachers")}
+              className="rounded-xl border border-white/30 bg-white/10 px-4 py-2.5 font-semibold text-white"
+            >
+              👨‍🏫 Find a Teacher
+            </button>
+          </div>
         </div>
-      </Card>
+      </section>
 
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat
+          icon="📚"
+          title="Courses"
+          value={courses.length}
+          onClick={() => setPage("courses")}
+        />
+
+        <Stat
+          icon="👨‍🏫"
+          title="Teachers"
+          value="Explore"
+          onClick={() => setPage("teachers")}
+        />
+
+        <Stat
+          icon="📅"
+          title="Bookings"
+          value={bookings.length}
+          onClick={() => setPage("bookings")}
+        />
+
+        <Stat
+          icon="📊"
+          title="Progress"
+          value="View"
+          onClick={() => setPage("progress")}
+        />
+      </div>
+
+      <section>
+        <div className="mb-5">
+          <h2 className="text-2xl font-black">
+            Start Learning
+          </h2>
+
+          <p className="text-sm text-slate-500">
+            Choose a course and take the MCQ diagnostic
+            test.
+          </p>
+        </div>
+
+        <div className="grid gap-5 md:grid-cols-3">
+          {courses.slice(0, 3).map((course) => (
+            <Card
+              key={course.id}
+              className="overflow-hidden"
+            >
+              <div className="h-2 bg-indigo-600" />
+
+              <div className="p-5">
+                <span className="rounded-lg bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-600">
+                  COURSE
+                </span>
+
+                <h3 className="mt-4 text-xl font-black">
+                  {text(course.title, "Course")}
+                </h3>
+
+                <p className="mt-2 line-clamp-2 text-sm text-slate-500">
+                  {text(
+                    course.description,
+                    "Assess your current competency."
+                  )}
+                </p>
+
+                <button
+                  onClick={() =>
+                    setPage(
+                      `course-${course.id}`
+                    )
+                  }
+                  className="mt-5 w-full rounded-xl bg-indigo-600 py-3 font-bold text-white"
+                >
+                  Open Course →
+                </button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
 
+function Stat({
+  icon,
+  title,
+  value,
+  onClick,
+}: {
+  icon: string;
+  title: string;
+  value: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="text-left"
+    >
+      <Card className="p-5 hover:shadow-md">
+        <div className="text-2xl">
+          {icon}
+        </div>
 
-// ============================================================
-// COURSES
-// ============================================================
+        <div className="mt-4 text-2xl font-black">
+          {value}
+        </div>
+
+        <div className="mt-1 text-sm text-slate-500">
+          {title}
+        </div>
+      </Card>
+    </button>
+  );
+}
+
+/* =========================================================
+   COURSES + COURSE LIST
+========================================================= */
 
 function CoursesPage({
-  onSelect,
-  onBack,
+  user,
+  setPage,
+  setError,
 }: {
-  onSelect: (course: Course) => void;
-  onBack: () => void;
+  user: User;
+  setPage: (page: string) => void;
+  setError: (error: string) => void;
 }) {
-  const [courses, setCourses] =
-    useState<Course[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [selectedCourse, setSelectedCourse] =
+    useState<number | null>(null);
+
+  const [loading, setLoading] =
+    useState(true);
 
   useEffect(() => {
-    api("/courses")
+    api<Course[]>("/courses")
       .then(setCourses)
       .catch((err) =>
         setError(err.message)
       )
       .finally(() => setLoading(false));
-  }, []);
+  }, [setError]);
+
+  if (selectedCourse !== null) {
+    return (
+      <CourseTest
+        courseId={selectedCourse}
+        user={user}
+        setPage={setPage}
+        setError={setError}
+        onBack={() =>
+          setSelectedCourse(null)
+        }
+      />
+    );
+  }
+
+  if (loading) return <Loading />;
 
   return (
-    <div>
+    <div className="space-y-7">
+      <div>
+        <div className="text-sm font-bold uppercase tracking-wider text-indigo-600">
+          Learning Library
+        </div>
 
-      <Button
-        secondary
-        onClick={onBack}
-      >
-        ← Dashboard
-      </Button>
-
-      <div className="mt-6">
-        <h1 className="text-3xl font-bold">
-          Courses
+        <h1 className="mt-2 text-3xl font-black">
+          📚 Courses
         </h1>
 
-        <p className="text-slate-500 mt-1">
-          Select a course and take a diagnostic test.
+        <p className="mt-2 text-slate-500">
+          Select a course to start your 15-question
+          diagnostic MCQ test.
         </p>
       </div>
 
-      {loading && <Spinner />}
+      {courses.length === 0 ? (
+        <Card className="p-10 text-center">
+          <div className="text-5xl">
+            📚
+          </div>
 
-      {error && (
-        <div className="mt-5 bg-red-50 text-red-700 p-4 rounded-xl">
-          {error}
+          <h2 className="mt-4 text-xl font-black">
+            No Courses Found
+          </h2>
+
+          <p className="mt-2 text-sm text-slate-500">
+            Courses are not available in the
+            database yet.
+          </p>
+        </Card>
+      ) : (
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {courses.map((course, index) => (
+            <Card
+              key={course.id}
+              className="overflow-hidden"
+            >
+              <div className="h-36 bg-gradient-to-br from-indigo-500 to-violet-600 p-5 text-white">
+                <div className="flex h-full flex-col justify-between">
+                  <span className="text-4xl">
+                    {index === 0
+                      ? "🐍"
+                      : index === 1
+                      ? "🗄️"
+                      : "☁️"}
+                  </span>
+
+                  <span className="text-sm font-bold uppercase">
+                    Course {index + 1}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-6">
+                <h2 className="text-xl font-black">
+                  {text(
+                    course.title,
+                    "Course"
+                  )}
+                </h2>
+
+                <p className="mt-2 min-h-12 text-sm text-slate-500">
+                  {text(
+                    course.description,
+                    "Test your knowledge and identify weak topics."
+                  )}
+                </p>
+
+                <div className="mt-5 flex gap-2">
+                  <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold">
+                    {course.topic_count || 0}{" "}
+                    Topics
+                  </span>
+
+                  <span className="rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-600">
+                    {course.question_count || 15}{" "}
+                    MCQs
+                  </span>
+                </div>
+
+                <button
+                  onClick={() =>
+                    setSelectedCourse(
+                      course.id
+                    )
+                  }
+                  className="mt-6 w-full rounded-xl bg-indigo-600 py-3 font-bold text-white hover:bg-indigo-700"
+                >
+                  📝 Start MCQ Test →
+                </button>
+              </div>
+            </Card>
+          ))}
         </div>
       )}
-
-      <div className="grid md:grid-cols-3 gap-5 mt-6">
-
-        {courses.map((course) => (
-          <Card
-            key={course.id}
-            className="p-6 hover:shadow-lg"
-          >
-
-            <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center text-2xl">
-              📘
-            </div>
-
-            <h2 className="text-xl font-bold mt-4">
-              {course.title}
-            </h2>
-
-            <p className="text-slate-500 mt-2 min-h-12">
-              {course.description ||
-                "Build your skills through assessment and guided learning."}
-            </p>
-
-            <div className="flex gap-2 mt-4">
-              <span className="text-xs bg-slate-100 px-3 py-1 rounded-full">
-                {course.topic_count} Topics
-              </span>
-
-              <span className="text-xs bg-slate-100 px-3 py-1 rounded-full">
-                {course.question_count} MCQs
-              </span>
-            </div>
-
-            <button
-              onClick={() => onSelect(course)}
-              className="w-full mt-5 bg-indigo-600 text-white py-3 rounded-xl font-semibold hover:bg-indigo-700"
-            >
-              Start Diagnostic Test →
-            </button>
-
-          </Card>
-        ))}
-
-      </div>
-
-      {!loading && courses.length === 0 && (
-        <Card className="p-8 mt-6 text-center">
-          No courses found.
-        </Card>
-      )}
-
     </div>
   );
 }
 
+/* =========================================================
+   MCQ TEST
+========================================================= */
 
-// ============================================================
-// TEST PAGE
-// ============================================================
-
-function TestPage({
+function CourseTest({
+  courseId,
   user,
-  course,
-  onFinished,
+  setPage,
+  setError,
   onBack,
 }: {
+  courseId: number;
   user: User;
-  course: Course;
-  onFinished: (
-    attemptId: number
-  ) => void;
+  setPage: (page: string) => void;
+  setError: (error: string) => void;
   onBack: () => void;
 }) {
+  const [course, setCourse] =
+    useState<Course | null>(null);
+
   const [questions, setQuestions] =
     useState<Question[]>([]);
+
+  const [topics, setTopics] =
+    useState<Topic[]>([]);
 
   const [answers, setAnswers] =
     useState<Record<number, string>>({});
 
-  const [index, setIndex] =
+  const [current, setCurrent] =
     useState(0);
+
+  const [result, setResult] =
+    useState<TestResult | null>(null);
 
   const [loading, setLoading] =
     useState(true);
@@ -859,14 +1176,604 @@ function TestPage({
   const [submitting, setSubmitting] =
     useState(false);
 
-  const [error, setError] =
-    useState("");
+  useEffect(() => {
+    Promise.all([
+      api<Course[]>("/courses"),
+      api<Question[]>(
+        `/courses/${courseId}/questions`
+      ),
+      api<Topic[]>(
+        `/courses/${courseId}/topics`
+      ),
+    ])
+      .then(([courseData, questionData, topicData]) => {
+        setCourse(
+          courseData.find(
+            (c) => c.id === courseId
+          ) || null
+        );
+
+        setQuestions(
+          questionData.slice(0, 15)
+        );
+
+        setTopics(topicData);
+      })
+      .catch((err) =>
+        setError(err.message)
+      )
+      .finally(() =>
+        setLoading(false)
+      );
+  }, [courseId, setError]);
+
+  async function submitTest() {
+    const unanswered = questions.filter(
+      (q) => !answers[q.id]
+    );
+
+    if (unanswered.length > 0) {
+      setError(
+        `Please answer all questions. ${unanswered.length} remaining.`
+      );
+      return;
+    }
+
+    setSubmitting(true);
+    setError("");
+
+    try {
+      const response = await api<{
+        attempt_id: number;
+      }>("/tests/submit", {
+        method: "POST",
+        body: JSON.stringify({
+          trainee_id: user.id,
+          course_id: courseId,
+          test_type: "pretest",
+          answers: questions.map(
+            (q) => ({
+              question_id: q.id,
+              answer: answers[q.id],
+            })
+          ),
+        }),
+      });
+
+      const detailed =
+        await api<TestResult>(
+          `/attempts/${response.attempt_id}/result`
+        );
+
+      setResult(detailed);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (loading) return <Loading />;
+
+  if (result) {
+    return (
+      <TestResultPage
+        result={result}
+        user={user}
+        setPage={setPage}
+        setError={setError}
+        onBack={onBack}
+      />
+    );
+  }
+
+  const question =
+    questions[current];
+
+  if (!question) {
+    return (
+      <Card className="p-10 text-center">
+        <h2 className="text-xl font-black">
+          No MCQs Available
+        </h2>
+
+        <Button
+          onClick={onBack}
+        >
+          Back to Courses
+        </Button>
+      </Card>
+    );
+  }
+
+  const topic =
+    topics.find(
+      (t) => t.id === question.topic_id
+    )?.name || "Topic";
+
+  return (
+    <div className="mx-auto max-w-4xl">
+      <button
+        onClick={onBack}
+        className="mb-5 text-sm font-bold text-indigo-600"
+      >
+        ← Back to Courses
+      </button>
+
+      <Card className="overflow-hidden">
+        <div className="bg-gradient-to-r from-indigo-600 to-violet-600 p-6 text-white">
+          <div className="text-sm text-indigo-100">
+            Diagnostic MCQ Test
+          </div>
+
+          <h1 className="mt-1 text-2xl font-black">
+            {text(
+              course?.title,
+              "Course"
+            )}
+          </h1>
+
+          <div className="mt-5 h-2 rounded-full bg-white/20">
+            <div
+              className="h-full rounded-full bg-white"
+              style={{
+                width: `${
+                  ((current + 1) /
+                    questions.length) *
+                  100
+                }%`,
+              }}
+            />
+          </div>
+
+          <div className="mt-2 text-sm">
+            Question {current + 1} of{" "}
+            {questions.length}
+          </div>
+        </div>
+
+        <div className="p-6 sm:p-8">
+          <span className="rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700">
+            {topic}
+          </span>
+
+          <h2 className="mt-5 text-xl font-black leading-8 sm:text-2xl">
+            {text(
+              question.text,
+              "Question"
+            )}
+          </h2>
+
+          <div className="mt-7 space-y-3">
+            {question.options.map(
+              (option, index) => {
+                const letter =
+                  String.fromCharCode(
+                    65 + index
+                  );
+
+                const selected =
+                  answers[question.id] ===
+                  letter;
+
+                return (
+                  <button
+                    key={index}
+                    onClick={() =>
+                      setAnswers(
+                        (prev) => ({
+                          ...prev,
+                          [question.id]:
+                            letter,
+                        })
+                      )
+                    }
+                    className={`flex w-full items-center gap-4 rounded-xl border p-4 text-left ${
+                      selected
+                        ? "border-indigo-500 bg-indigo-50"
+                        : "border-slate-200 hover:border-indigo-300"
+                    }`}
+                  >
+                    <span
+                      className={`flex h-9 w-9 items-center justify-center rounded-lg font-black ${
+                        selected
+                          ? "bg-indigo-600 text-white"
+                          : "bg-slate-100"
+                      }`}
+                    >
+                      {letter}
+                    </span>
+
+                    <span className="font-medium">
+                      {text(option)}
+                    </span>
+                  </button>
+                );
+              }
+            )}
+          </div>
+
+          <div className="mt-8 flex justify-between gap-3">
+            <Button
+              variant="secondary"
+              disabled={current === 0}
+              onClick={() =>
+                setCurrent(
+                  Math.max(0, current - 1)
+                )
+              }
+            >
+              ← Previous
+            </Button>
+
+            {current <
+            questions.length - 1 ? (
+              <Button
+                onClick={() =>
+                  setCurrent(
+                    Math.min(
+                      questions.length - 1,
+                      current + 1
+                    )
+                  )
+                }
+              >
+                Next →
+              </Button>
+            ) : (
+              <Button
+                onClick={submitTest}
+                disabled={submitting}
+              >
+                {submitting
+                  ? "Submitting..."
+                  : "Submit Test ✓"}
+              </Button>
+            )}
+          </div>
+        </div>
+      </Card>
+
+      <div className="mt-5 flex flex-wrap justify-center gap-2">
+        {questions.map((q, i) => (
+          <button
+            key={q.id}
+            onClick={() =>
+              setCurrent(i)
+            }
+            className={`h-9 w-9 rounded-lg text-sm font-bold ${
+              i === current
+                ? "bg-indigo-600 text-white"
+                : answers[q.id]
+                ? "bg-emerald-100 text-emerald-700"
+                : "border bg-white text-slate-500"
+            }`}
+          >
+            {i + 1}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   TEST RESULT
+========================================================= */
+
+function TestResultPage({
+  result,
+  user,
+  setPage,
+  setError,
+  onBack,
+}: {
+  result: TestResult;
+  user: User;
+  setPage: (page: string) => void;
+  setError: (error: string) => void;
+  onBack: () => void;
+}) {
+  const [topicId, setTopicId] =
+    useState<number | null>(
+      result.weak_topics?.[0]
+        ?.topic_id || null
+    );
+
+  const wrong =
+    result.questions.filter(
+      (q) => !q.is_correct
+    );
+
+  return (
+    <div className="space-y-7">
+      <button
+        onClick={onBack}
+        className="text-sm font-bold text-indigo-600"
+      >
+        ← Back to Courses
+      </button>
+
+      <div>
+        <h1 className="text-3xl font-black">
+          📊 Test Result
+        </h1>
+
+        <p className="mt-2 text-slate-500">
+          Your competency analysis.
+        </p>
+      </div>
+
+      <div className="grid gap-5 md:grid-cols-3">
+        <Card className="p-6 text-center">
+          <div className="text-sm font-bold uppercase text-slate-400">
+            Score
+          </div>
+
+          <div className="mt-2 text-5xl font-black text-indigo-600">
+            {Math.round(
+              result.score
+            )}
+            %
+          </div>
+        </Card>
+
+        <Card className="p-6 text-center">
+          <div className="text-sm font-bold uppercase text-slate-400">
+            Questions
+          </div>
+
+          <div className="mt-2 text-4xl font-black">
+            {result.questions.length}
+          </div>
+        </Card>
+
+        <Card className="p-6 text-center">
+          <div className="text-sm font-bold uppercase text-slate-400">
+            Weak Topics
+          </div>
+
+          <div className="mt-2 text-4xl font-black text-red-500">
+            {result.weak_topics?.length ||
+              0}
+          </div>
+        </Card>
+      </div>
+
+      <Card className="p-6">
+        <h2 className="text-xl font-black">
+          Topic-wise Analysis
+        </h2>
+
+        <div className="mt-5 space-y-4">
+          {(result.topic_analysis ||
+            []).map((item) => (
+              <div key={item.topic}>
+                <div className="mb-2 flex justify-between">
+                  <span className="font-bold">
+                    {text(
+                      item.topic,
+                      "Topic"
+                    )}
+                  </span>
+
+                  <span className="font-black">
+                    {Math.round(
+                      item.percentage
+                    )}
+                    %
+                  </span>
+                </div>
+
+                <div className="h-3 rounded-full bg-slate-100">
+                  <div
+                    className={`h-full rounded-full ${
+                      item.percentage < 60
+                        ? "bg-red-500"
+                        : item.percentage <
+                          80
+                        ? "bg-amber-500"
+                        : "bg-emerald-500"
+                    }`}
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        Math.max(
+                          0,
+                          item.percentage
+                        )
+                      )}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+        </div>
+      </Card>
+
+      <Card className="p-6">
+        <h2 className="text-xl font-black">
+          ❌ Wrong MCQs
+        </h2>
+
+        <div className="mt-5 space-y-5">
+          {wrong.map((q, index) => (
+            <div
+              key={q.question_id}
+              className="rounded-2xl border border-red-100 bg-red-50/50 p-5"
+            >
+              <div className="text-xs font-black uppercase text-red-500">
+                Wrong Question #{index + 1}
+              </div>
+
+              <h3 className="mt-2 font-bold leading-6">
+                {q.question}
+              </h3>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl bg-red-100 p-4">
+                  <div className="text-xs font-bold text-red-600">
+                    Your Answer
+                  </div>
+
+                  <div className="mt-1 font-black text-red-800">
+                    {q.your_answer ||
+                      "Not answered"}
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-emerald-100 p-4">
+                  <div className="text-xs font-bold text-emerald-600">
+                    Correct Answer
+                  </div>
+
+                  <div className="mt-1 font-black text-emerald-800">
+                    {q.correct_answer}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 text-xs text-slate-500">
+                Topic:{" "}
+                {text(
+                  q.topic,
+                  "Topic"
+                )}
+              </div>
+            </div>
+          ))}
+
+          {wrong.length === 0 && (
+            <div className="rounded-xl bg-emerald-50 p-5 text-center font-bold text-emerald-700">
+              🎉 All answers are correct!
+            </div>
+          )}
+        </div>
+      </Card>
+
+      <Card className="p-6">
+        <h2 className="text-xl font-black">
+          🎯 Recommended Trainers
+        </h2>
+
+        <p className="mt-1 text-sm text-slate-500">
+          Trainers are automatically recommended
+          according to your weak topics.
+        </p>
+
+        {result.weak_topics?.length ===
+        0 ? (
+          <div className="mt-5 rounded-xl bg-emerald-50 p-5 text-emerald-700">
+            Great! You don't have any weak
+            topic.
+          </div>
+        ) : (
+          <>
+            <div className="mt-5 flex flex-wrap gap-2">
+              {result.weak_topics.map(
+                (topic) => (
+                  <button
+                    key={topic.topic_id}
+                    onClick={() =>
+                      setTopicId(
+                        topic.topic_id
+                      )
+                    }
+                    className={`rounded-xl px-4 py-2 text-sm font-bold ${
+                      topicId ===
+                      topic.topic_id
+                        ? "bg-indigo-600 text-white"
+                        : "bg-red-50 text-red-600"
+                    }`}
+                  >
+                    {topic.topic}{" "}
+                    {Math.round(
+                      topic.percentage
+                    )}
+                    %
+                  </button>
+                )
+              )}
+            </div>
+
+            {topicId && (
+              <RecommendedTrainers
+                topicId={topicId}
+                user={user}
+                setError={setError}
+              />
+            )}
+          </>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* =========================================================
+   RECOMMENDED TRAINERS
+========================================================= */
+
+function RecommendedTrainers({
+  topicId,
+  user,
+  setError,
+}: {
+  topicId: number;
+  user: User;
+  setError: (error: string) => void;
+}) {
+  const [trainers, setTrainers] =
+    useState<Trainer[]>([]);
+
+  const [slots, setSlots] =
+    useState<Record<number, Slot[]>>(
+      {}
+    );
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [booking, setBooking] =
+    useState<number | null>(null);
 
   useEffect(() => {
-    api(`/courses/${course.id}/questions`)
-      .then((data) => {
-        setQuestions(
-          Array.isArray(data) ? data : []
+    setLoading(true);
+
+    api<Trainer[]>(
+      `/trainers/recommended/${topicId}`
+    )
+      .then(async (trainerData) => {
+        setTrainers(trainerData);
+
+        const allSlots =
+          await Promise.all(
+            trainerData.map(
+              async (trainer) => {
+                try {
+                  const data =
+                    await api<Slot[]>(
+                      `/trainers/${trainer.id}/slots`
+                    );
+
+                  return [
+                    trainer.id,
+                    data,
+                  ] as const;
+                } catch {
+                  return [
+                    trainer.id,
+                    [],
+                  ] as const;
+                }
+              }
+            )
+          );
+
+        setSlots(
+          Object.fromEntries(
+            allSlots
+          )
         );
       })
       .catch((err) =>
@@ -875,836 +1782,226 @@ function TestPage({
       .finally(() =>
         setLoading(false)
       );
-  }, [course.id]);
-
-  if (loading) {
-    return <Spinner />;
-  }
-
-  if (error) {
-    return (
-      <div>
-        <Button
-          secondary
-          onClick={onBack}
-        >
-          ← Back
-        </Button>
-
-        <div className="bg-red-50 text-red-700 p-4 rounded-xl mt-5">
-          {error}
-        </div>
-      </div>
-    );
-  }
-
-  if (questions.length === 0) {
-    return (
-      <Card className="p-8 text-center">
-        <h2 className="text-xl font-bold">
-          No questions found
-        </h2>
-
-        <Button
-          secondary
-          onClick={onBack}
-        >
-          Go Back
-        </Button>
-      </Card>
-    );
-  }
-
-  const current =
-    questions[index];
-
-  const selected =
-    answers[current.id];
-
-  const answeredCount =
-    Object.keys(answers).length;
-
-  async function submitTest() {
-    if (answeredCount < questions.length) {
-      const confirmSubmit =
-        window.confirm(
-          `You answered ${answeredCount} of ${questions.length} questions. Submit anyway?`
-        );
-
-      if (!confirmSubmit) {
-        return;
-      }
-    }
-
-    setSubmitting(true);
-    setError("");
-
-    try {
-      const payload = questions.map(
-        (q) => ({
-          question_id: q.id,
-          answer: answers[q.id] || "",
-        })
-      );
-
-      const data = await api(
-        "/tests/submit",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            trainee_id: user.id,
-            course_id: course.id,
-            test_type: "pretest",
-            answers: payload,
-          }),
-        }
-      );
-
-      onFinished(data.attempt_id);
-    } catch (err: any) {
-      setError(
-        err?.message ||
-          "Unable to submit test."
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <div className="max-w-4xl mx-auto">
-
-      <Button
-        secondary
-        onClick={onBack}
-      >
-        ← Exit Test
-      </Button>
-
-      <Card className="p-6 mt-5">
-
-        <div className="flex justify-between items-center gap-4">
-          <div>
-            <p className="text-sm text-slate-500">
-              Diagnostic Test
-            </p>
-
-            <h1 className="text-2xl font-bold">
-              {course.title}
-            </h1>
-          </div>
-
-          <div className="text-right">
-            <p className="font-bold text-indigo-600">
-              {index + 1} / {questions.length}
-            </p>
-
-            <p className="text-xs text-slate-500">
-              {answeredCount} answered
-            </p>
-          </div>
-        </div>
-
-        <div className="h-2 bg-slate-100 rounded-full mt-5 overflow-hidden">
-          <div
-            className="h-full bg-indigo-600"
-            style={{
-              width: `${
-                ((index + 1) /
-                  questions.length) *
-                100
-              }%`,
-            }}
-          />
-        </div>
-
-        <div className="mt-8">
-
-          <span className="inline-block bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-sm">
-            Question {index + 1}
-          </span>
-
-          <h2 className="text-xl font-semibold mt-4">
-            {current.text}
-          </h2>
-
-          <div className="space-y-3 mt-6">
-
-            {current.options.map(
-              (option, optionIndex) => {
-                const letter =
-                  String.fromCharCode(
-                    65 + optionIndex
-                  );
-
-                const isSelected =
-                  selected === option;
-
-                return (
-                  <button
-                    key={optionIndex}
-                    onClick={() =>
-                      setAnswers({
-                        ...answers,
-                        [current.id]:
-                          option,
-                      })
-                    }
-                    className={`w-full text-left p-4 rounded-xl border-2 transition ${
-                      isSelected
-                        ? "border-indigo-600 bg-indigo-50"
-                        : "border-slate-200 hover:border-indigo-300"
-                    }`}
-                  >
-                    <span className="inline-flex w-8 h-8 rounded-full bg-slate-100 items-center justify-center font-bold mr-3">
-                      {letter}
-                    </span>
-
-                    {option}
-                  </button>
-                );
-              }
-            )}
-
-          </div>
-
-        </div>
-
-        {error && (
-          <div className="mt-5 bg-red-50 text-red-700 p-3 rounded-xl">
-            {error}
-          </div>
-        )}
-
-        <div className="flex justify-between mt-8">
-
-          <Button
-            secondary
-            disabled={index === 0}
-            onClick={() =>
-              setIndex(
-                Math.max(0, index - 1)
-              )
-            }
-          >
-            ← Previous
-          </Button>
-
-          {index <
-          questions.length - 1 ? (
-            <Button
-              onClick={() =>
-                setIndex(index + 1)
-              }
-            >
-              Next →
-            </Button>
-          ) : (
-            <Button
-              disabled={submitting}
-              onClick={submitTest}
-            >
-              {submitting
-                ? "Submitting..."
-                : "Submit Test ✓"}
-            </Button>
-          )}
-
-        </div>
-
-      </Card>
-    </div>
-  );
-}
-
-
-// ============================================================
-// TEST RESULT
-// ============================================================
-
-function ResultPage({
-  result,
-  onTeachers,
-  onDashboard,
-}: {
-  result: AttemptResult;
-  onTeachers: () => void;
-  onDashboard: () => void;
-}) {
-  const wrongQuestions =
-    result.questions.filter(
-      (q) => !q.is_correct
-    );
-
-  return (
-    <div>
-
-      <Card className="p-7 bg-gradient-to-r from-indigo-50 to-blue-50">
-
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
-
-          <div>
-            <p className="text-sm text-slate-500">
-              Diagnostic Test Completed
-            </p>
-
-            <h1 className="text-3xl font-bold mt-1">
-              Your Skill Analysis
-            </h1>
-          </div>
-
-          <div className="text-center">
-            <div className="text-5xl font-black text-indigo-600">
-              {result.score}%
-            </div>
-
-            <p className="text-slate-500">
-              Overall Score
-            </p>
-          </div>
-
-        </div>
-      </Card>
-
-
-      {/* TOPIC ANALYSIS */}
-
-      <Card className="p-6 mt-6">
-
-        <h2 className="text-xl font-bold">
-          Topic-wise Performance
-        </h2>
-
-        <div className="grid md:grid-cols-2 gap-4 mt-5">
-
-          {result.topic_analysis.map(
-            (topic) => (
-              <div
-                key={topic.topic_id}
-                className="border border-slate-200 rounded-xl p-4"
-              >
-
-                <div className="flex justify-between">
-                  <span className="font-semibold">
-                    {topic.topic}
-                  </span>
-
-                  <span
-                    className={
-                      topic.weak
-                        ? "text-red-600 font-bold"
-                        : "text-green-600 font-bold"
-                    }
-                  >
-                    {topic.percentage}%
-                  </span>
-                </div>
-
-                <div className="h-2 bg-slate-100 rounded-full mt-3">
-                  <div
-                    className={`h-full rounded-full ${
-                      topic.weak
-                        ? "bg-red-500"
-                        : "bg-green-500"
-                    }`}
-                    style={{
-                      width: `${Math.max(
-                        0,
-                        Math.min(
-                          100,
-                          topic.percentage
-                        )
-                      )}%`,
-                    }}
-                  />
-                </div>
-
-                {topic.weak && (
-                  <p className="text-red-600 text-sm mt-2">
-                    Needs improvement
-                  </p>
-                )}
-
-              </div>
-            )
-          )}
-
-        </div>
-
-      </Card>
-
-
-      {/* WRONG QUESTIONS */}
-
-      <Card className="p-6 mt-6">
-
-        <div className="flex justify-between items-center">
-          <div>
-            <h2 className="text-xl font-bold">
-              Wrong MCQs
-            </h2>
-
-            <p className="text-slate-500 text-sm mt-1">
-              Review your mistakes and learn from them.
-            </p>
-          </div>
-
-          <span className="bg-red-50 text-red-700 px-3 py-1 rounded-full text-sm font-semibold">
-            {wrongQuestions.length} wrong
-          </span>
-        </div>
-
-        <div className="space-y-5 mt-6">
-
-          {wrongQuestions.map(
-            (q, i) => (
-              <div
-                key={q.question_id}
-                className="border border-red-200 rounded-xl p-5 bg-red-50/40"
-              >
-
-                <p className="font-semibold">
-                  {i + 1}. {q.question}
-                </p>
-
-                <p className="text-sm text-slate-500 mt-2">
-                  Topic: {q.topic}
-                </p>
-
-                <div className="grid md:grid-cols-2 gap-3 mt-4">
-
-                  <div className="bg-red-100 text-red-800 p-3 rounded-lg">
-                    <p className="text-xs font-semibold">
-                      YOUR ANSWER
-                    </p>
-
-                    <p className="mt-1">
-                      {q.your_answer ||
-                        "Not answered"}
-                    </p>
-                  </div>
-
-                  <div className="bg-green-100 text-green-800 p-3 rounded-lg">
-                    <p className="text-xs font-semibold">
-                      CORRECT ANSWER
-                    </p>
-
-                    <p className="mt-1">
-                      {q.correct_answer}
-                    </p>
-                  </div>
-
-                </div>
-
-              </div>
-            )
-          )}
-
-        </div>
-
-        {wrongQuestions.length === 0 && (
-          <div className="bg-green-50 text-green-700 p-5 rounded-xl mt-5">
-            🎉 Excellent! You answered every submitted question correctly.
-          </div>
-        )}
-
-      </Card>
-
-
-      {/* TRAINER */}
-
-      <Card className="p-6 mt-6">
-
-        <h2 className="text-xl font-bold">
-          🎯 Recommended Learning
-        </h2>
-
-        {result.weak_topics.length > 0 ? (
-          <>
-            <p className="text-slate-500 mt-1">
-              We detected weak topics. Find a trainer
-              who specializes in these topics.
-            </p>
-
-            <div className="flex flex-wrap gap-2 mt-4">
-              {result.weak_topics.map(
-                (topic) => (
-                  <span
-                    key={topic.topic_id}
-                    className="bg-red-50 text-red-700 px-3 py-1.5 rounded-full text-sm font-semibold"
-                  >
-                    {topic.topic} •{" "}
-                    {topic.percentage}%
-                  </span>
-                )
-              )}
-            </div>
-
-            <Button
-              onClick={onTeachers}
-            >
-              Find Recommended Trainers →
-            </Button>
-          </>
-        ) : (
-          <>
-            <p className="text-green-700 mt-2">
-              🎉 No major skill gap detected.
-            </p>
-
-            <p className="text-slate-500 mt-2">
-              You can still book a trainer for advanced
-              practice.
-            </p>
-
-            <Button
-              onClick={onTeachers}
-            >
-              Browse Teachers →
-            </Button>
-          </>
-        )}
-
-      </Card>
-
-      <div className="mt-6">
-        <Button
-          secondary
-          onClick={onDashboard}
-        >
-          ← Back to Dashboard
-        </Button>
-      </div>
-
-    </div>
-  );
-}
-
-
-// ============================================================
-// TEACHERS
-// ============================================================
-
-function TeachersPage({
-  onSelect,
-  onBack,
-}: {
-  onSelect: (trainer: Trainer) => void;
-  onBack: () => void;
-}) {
-  const [trainers, setTrainers] =
-    useState<Trainer[]>([]);
-
-  const [loading, setLoading] =
-    useState(true);
-
-  useEffect(() => {
-    api("/trainers")
-      .then((data) =>
-        setTrainers(
-          Array.isArray(data)
-            ? data
-            : []
-        )
-      )
-      .catch(() =>
-        setTrainers([])
-      )
-      .finally(() =>
-        setLoading(false)
-      );
-  }, []);
-
-  return (
-    <div>
-
-      <Button
-        secondary
-        onClick={onBack}
-      >
-        ← Dashboard
-      </Button>
-
-      <div className="mt-6">
-        <h1 className="text-3xl font-bold">
-          👨‍🏫 Teachers
-        </h1>
-
-        <p className="text-slate-500 mt-1">
-          Choose a teacher directly. Test is not required.
-        </p>
-      </div>
-
-      {loading && <Spinner />}
-
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5 mt-6">
-
-        {trainers.map(
-          (trainer) => (
-            <Card
-              key={trainer.id}
-              className="p-6"
-            >
-
-              <InitialAvatar
-                name={trainer.name}
-                size="large"
-              />
-
-              <h2 className="text-xl font-bold mt-4">
-                {trainer.name}
-              </h2>
-
-              <p className="text-sm text-slate-500 mt-1">
-                {trainer.email}
-              </p>
-
-              <p className="text-slate-600 mt-3 line-clamp-3">
-                {trainer.bio ||
-                  "Experienced SkillSphere trainer."}
-              </p>
-
-              <div className="flex flex-wrap gap-2 mt-4">
-
-                {(trainer.expertise || []).map(
-                  (topic) => (
-                    <span
-                      key={topic.id}
-                      className="text-xs bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-full"
-                    >
-                      {topic.name}
-                    </span>
-                  )
-                )}
-
-              </div>
-
-              <div className="flex justify-between items-center mt-5">
-
-                <span className="text-sm text-slate-500">
-                  {trainer.available_slots || 0} slots
-                </span>
-
-                <Button
-                  onClick={() =>
-                    onSelect(trainer)
-                  }
-                >
-                  View Teacher
-                </Button>
-
-              </div>
-
-            </Card>
-          )
-        )}
-
-      </div>
-
-    </div>
-  );
-}
-
-
-// ============================================================
-// TEACHER DETAIL
-// ============================================================
-
-function TeacherPage({
-  trainer,
-  onBook,
-  onBack,
-}: {
-  trainer: Trainer;
-  onBook: (
-    trainer: Trainer,
-    topic: Topic
-  ) => void;
-  onBack: () => void;
-}) {
-  const [topics, setTopics] =
-    useState<Topic[]>([]);
-
-  const [loading, setLoading] =
-    useState(true);
-
-  useEffect(() => {
-    api(`/trainers/${trainer.id}/topics`)
-      .then((data) =>
-        setTopics(
-          Array.isArray(data)
-            ? data
-            : []
-        )
-      )
-      .catch(() =>
-        setTopics([])
-      )
-      .finally(() =>
-        setLoading(false)
-      );
-  }, [trainer.id]);
-
-  return (
-    <div>
-
-      <Button
-        secondary
-        onClick={onBack}
-      >
-        ← Teachers
-      </Button>
-
-      <Card className="p-7 mt-5">
-
-        <div className="flex flex-col md:flex-row gap-6">
-
-          <InitialAvatar
-            name={trainer.name}
-            size="large"
-          />
-
-          <div className="flex-1">
-
-            <h1 className="text-3xl font-bold">
-              {trainer.name}
-            </h1>
-
-            <p className="text-slate-500 mt-1">
-              {trainer.email}
-            </p>
-
-            <p className="text-slate-600 mt-4">
-              {trainer.bio ||
-                "SkillSphere trainer"}
-            </p>
-
-          </div>
-
-        </div>
-
-      </Card>
-
-      <Card className="p-6 mt-5">
-
-        <h2 className="text-xl font-bold">
-          Select Topic
-        </h2>
-
-        <p className="text-slate-500 mt-1">
-          Choose what you want to learn with this trainer.
-        </p>
-
-        {loading ? (
-          <Spinner />
-        ) : (
-          <div className="grid md:grid-cols-2 gap-4 mt-5">
-
-            {topics.map(
-              (topic) => (
-                <button
-                  key={topic.id}
-                  onClick={() =>
-                    onBook(
-                      trainer,
-                      topic
-                    )
-                  }
-                  className="text-left border border-slate-200 rounded-xl p-5 hover:border-indigo-500 hover:bg-indigo-50 transition"
-                >
-                  <p className="font-bold">
-                    {topic.name}
-                  </p>
-
-                  <p className="text-sm text-slate-500 mt-1">
-                    Book a lecture →
-                  </p>
-                </button>
-              )
-            )}
-
-          </div>
-        )}
-
-        {!loading &&
-          topics.length === 0 && (
-            <div className="bg-yellow-50 text-yellow-700 p-4 rounded-xl mt-5">
-              This trainer currently has no topics assigned.
-            </div>
-          )}
-
-      </Card>
-
-    </div>
-  );
-}
-
-
-// ============================================================
-// BOOKING
-// ============================================================
-
-function BookingPage({
-  user,
-  trainer,
-  topic,
-  onDone,
-  onBack,
-}: {
-  user: User;
-  trainer: Trainer;
-  topic: Topic;
-  onDone: () => void;
-  onBack: () => void;
-}) {
-  const [slots, setSlots] =
-    useState<Slot[]>([]);
-
-  const [loading, setLoading] =
-    useState(true);
-
-  const [booking, setBooking] =
-    useState(false);
-
-  const [error, setError] =
-    useState("");
-
-  async function loadSlots() {
-    setLoading(true);
-
-    try {
-      const data = await api(
-        `/trainers/${trainer.id}/slots`
-      );
-
-      setSlots(
-        Array.isArray(data)
-          ? data
-          : []
-      );
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    loadSlots();
-  }, [trainer.id]);
-
-  async function book(slot: Slot) {
-    setBooking(true);
-    setError("");
+  }, [topicId, setError]);
+
+  async function book(
+    trainerId: number,
+    slotId: number
+  ) {
+    setBooking(slotId);
 
     try {
       await api("/bookings", {
         method: "POST",
         body: JSON.stringify({
           trainee_id: user.id,
-          trainer_id: trainer.id,
-          slot_id: slot.id,
-          topic_id: topic.id,
+          trainer_id: trainerId,
+          slot_id: slotId,
+          topic_id: topicId,
+        }),
+      });
+
+      alert(
+        "Lecture booked successfully!"
+      );
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBooking(null);
+    }
+  }
+
+  if (loading) return <Loading />;
+
+  if (!trainers.length) {
+    return (
+      <div className="mt-5 rounded-xl bg-amber-50 p-5 text-amber-700">
+        No trainer is currently available
+        for this topic.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-6 grid gap-5 md:grid-cols-2">
+      {trainers.map((trainer) => {
+        const availableSlots =
+          (slots[trainer.id] ||
+            []).filter(
+              (slot) => slot.available
+            );
+
+        return (
+          <Card
+            key={trainer.id}
+            className="p-5"
+          >
+            <div className="flex gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-100 font-black text-indigo-700">
+                {initials(
+                  trainer.name
+                )}
+              </div>
+
+              <div>
+                <h3 className="font-black">
+                  {text(
+                    trainer.name,
+                    "Trainer"
+                  )}
+                </h3>
+
+                <p className="text-sm text-slate-500">
+                  {text(
+                    trainer.email
+                  )}
+                </p>
+
+                {trainer.bio && (
+                  <p className="mt-2 text-sm text-slate-500">
+                    {trainer.bio}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-5">
+              <div className="mb-3 font-black">
+                Available Slots
+              </div>
+
+              {availableSlots.map(
+                (slot) => (
+                  <button
+                    key={slot.id}
+                    disabled={
+                      booking === slot.id
+                    }
+                    onClick={() =>
+                      book(
+                        trainer.id,
+                        slot.id
+                      )
+                    }
+                    className="mb-2 flex w-full justify-between rounded-xl border border-slate-200 p-3 hover:border-indigo-400 hover:bg-indigo-50"
+                  >
+                    <span className="font-semibold">
+                      🕐{" "}
+                      {slot.start_time}{" "}
+                      -{" "}
+                      {slot.end_time}
+                    </span>
+
+                    <span className="font-bold text-indigo-600">
+                      {booking ===
+                      slot.id
+                        ? "Booking..."
+                        : "Book →"}
+                    </span>
+                  </button>
+                )
+              )}
+
+              {availableSlots.length ===
+                0 && (
+                <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">
+                  No available slots.
+                </div>
+              )}
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+/* =========================================================
+   TEACHERS
+========================================================= */
+
+function TeachersPage({
+  user,
+  setError,
+}: {
+  user: User;
+  setError: (error: string) => void;
+}) {
+  const [trainers, setTrainers] =
+    useState<Trainer[]>([]);
+
+  const [selected, setSelected] =
+    useState<Trainer | null>(null);
+
+  const [topics, setTopics] =
+    useState<Topic[]>([]);
+
+  const [slots, setSlots] =
+    useState<Slot[]>([]);
+
+  const [topicId, setTopicId] =
+    useState<number | null>(null);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [booking, setBooking] =
+    useState<number | null>(null);
+
+  useEffect(() => {
+    api<Trainer[]>("/trainers")
+      .then(setTrainers)
+      .catch((err) =>
+        setError(err.message)
+      )
+      .finally(() =>
+        setLoading(false)
+      );
+  }, [setError]);
+
+  async function selectTeacher(
+    trainer: Trainer
+  ) {
+    setSelected(trainer);
+
+    try {
+      const [topicData, slotData] =
+        await Promise.all([
+          api<Topic[]>(
+            `/trainers/${trainer.id}/topics`
+          ),
+          api<Slot[]>(
+            `/trainers/${trainer.id}/slots`
+          ),
+        ]);
+
+      setTopics(topicData);
+      setSlots(slotData);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
+  async function book(
+    slotId: number
+  ) {
+    if (!selected || !topicId) {
+      setError(
+        "Please select a topic first."
+      );
+      return;
+    }
+
+    setBooking(slotId);
+
+    try {
+      await api("/bookings", {
+        method: "POST",
+        body: JSON.stringify({
+          trainee_id: user.id,
+          trainer_id: selected.id,
+          slot_id: slotId,
+          topic_id: topicId,
         }),
       });
 
@@ -1712,118 +2009,214 @@ function BookingPage({
         "Lecture booked successfully!"
       );
 
-      onDone();
-    } catch (err: any) {
-      setError(
-        err?.message ||
-          "Unable to book slot."
+      setSlots(
+        await api<Slot[]>(
+          `/trainers/${selected.id}/slots`
+        )
       );
+    } catch (err: any) {
+      setError(err.message);
     } finally {
-      setBooking(false);
+      setBooking(null);
     }
   }
 
+  if (loading) return <Loading />;
+
+  if (selected) {
+    return (
+      <div className="space-y-6">
+        <button
+          onClick={() =>
+            setSelected(null)
+          }
+          className="text-sm font-bold text-indigo-600"
+        >
+          ← Back to Teachers
+        </button>
+
+        <Card className="p-6">
+          <div className="flex items-center gap-4">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-indigo-100 text-xl font-black text-indigo-700">
+              {initials(
+                selected.name
+              )}
+            </div>
+
+            <div>
+              <h1 className="text-2xl font-black">
+                {text(
+                  selected.name,
+                  "Teacher"
+                )}
+              </h1>
+
+              <p className="text-sm text-slate-500">
+                {text(
+                  selected.email
+                )}
+              </p>
+            </div>
+          </div>
+        </Card>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card className="p-6">
+            <h2 className="text-lg font-black">
+              1. Select Topic
+            </h2>
+
+            <p className="mt-1 text-sm text-slate-500">
+              No test is required for direct
+              teacher booking.
+            </p>
+
+            <div className="mt-5 space-y-2">
+              {topics.map((topic) => (
+                <button
+                  key={topic.id}
+                  onClick={() =>
+                    setTopicId(
+                      topic.id
+                    )
+                  }
+                  className={`w-full rounded-xl border p-4 text-left font-bold ${
+                    topicId ===
+                    topic.id
+                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                      : "border-slate-200"
+                  }`}
+                >
+                  📘 {topic.name}
+                </button>
+              ))}
+            </div>
+          </Card>
+
+          <Card className="p-6">
+            <h2 className="text-lg font-black">
+              2. Available Slots
+            </h2>
+
+            <div className="mt-5 space-y-3">
+              {slots
+                .filter(
+                  (slot) =>
+                    slot.available
+                )
+                .map((slot) => (
+                  <button
+                    key={slot.id}
+                    disabled={
+                      booking ===
+                      slot.id
+                    }
+                    onClick={() =>
+                      book(slot.id)
+                    }
+                    className="flex w-full justify-between rounded-xl border border-slate-200 p-4 hover:border-indigo-400 hover:bg-indigo-50"
+                  >
+                    <span className="font-bold">
+                      🕐{" "}
+                      {slot.start_time}{" "}
+                      -{" "}
+                      {slot.end_time}
+                    </span>
+
+                    <span className="font-bold text-indigo-600">
+                      {booking ===
+                      slot.id
+                        ? "Booking..."
+                        : "Book"}
+                    </span>
+                  </button>
+                ))}
+            </div>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div>
+    <div className="space-y-7">
+      <div>
+        <div className="text-sm font-bold uppercase tracking-wider text-indigo-600">
+          Direct Learning
+        </div>
 
-      <Button
-        secondary
-        onClick={onBack}
-      >
-        ← Back
-      </Button>
-
-      <Card className="p-6 mt-5">
-
-        <p className="text-sm text-slate-500">
-          Booking Lecture
-        </p>
-
-        <h1 className="text-3xl font-bold mt-1">
-          {trainer.name}
+        <h1 className="mt-2 text-3xl font-black">
+          👨‍🏫 Teachers
         </h1>
 
-        <p className="text-indigo-600 font-semibold mt-2">
-          Topic: {topic.name}
+        <p className="mt-2 text-slate-500">
+          Directly select a teacher, topic and
+          lecture slot.
         </p>
+      </div>
 
-        {error && (
-          <div className="bg-red-50 text-red-700 p-3 rounded-xl mt-5">
-            {error}
-          </div>
-        )}
+      <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+        {trainers.map((trainer) => (
+          <Card
+            key={trainer.id}
+            className="p-6"
+          >
+            <div className="flex items-center gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-indigo-100 font-black text-indigo-700">
+                {initials(
+                  trainer.name
+                )}
+              </div>
 
-        <h2 className="text-xl font-bold mt-7">
-          Available Slots
-        </h2>
+              <div>
+                <h2 className="font-black">
+                  {text(
+                    trainer.name,
+                    "Teacher"
+                  )}
+                </h2>
 
-        {loading ? (
-          <Spinner />
-        ) : (
-          <div className="grid md:grid-cols-2 gap-4 mt-5">
-
-            {slots
-              .filter(
-                (slot) =>
-                  slot.available
-              )
-              .map((slot) => (
-                <div
-                  key={slot.id}
-                  className="border border-slate-200 rounded-xl p-5 flex items-center justify-between gap-4"
-                >
-
-                  <div>
-                    <p className="font-bold">
-                      {slot.start_time}
-                    </p>
-
-                    <p className="text-sm text-slate-500">
-                      to {slot.end_time}
-                    </p>
-                  </div>
-
-                  <Button
-                    disabled={booking}
-                    onClick={() =>
-                      book(slot)
-                    }
-                  >
-                    Book
-                  </Button>
-
-                </div>
-              ))}
-
-          </div>
-        )}
-
-        {!loading &&
-          slots.filter(
-            (s) => s.available
-          ).length === 0 && (
-            <div className="bg-yellow-50 text-yellow-700 p-5 rounded-xl mt-5">
-              No available slots currently.
+                <p className="text-xs text-slate-500">
+                  {text(
+                    trainer.email
+                  )}
+                </p>
+              </div>
             </div>
-          )}
 
-      </Card>
+            {trainer.bio && (
+              <p className="mt-4 text-sm text-slate-500">
+                {trainer.bio}
+              </p>
+            )}
 
+            <button
+              onClick={() =>
+                selectTeacher(
+                  trainer
+                )
+              }
+              className="mt-5 w-full rounded-xl bg-indigo-600 py-3 font-bold text-white"
+            >
+              View Topics & Slots →
+            </button>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }
 
-
-// ============================================================
-// BOOKINGS
-// ============================================================
+/* =========================================================
+   BOOKINGS
+========================================================= */
 
 function BookingsPage({
   user,
-  onBack,
+  setError,
 }: {
   user: User;
-  onBack: () => void;
+  setError: (error: string) => void;
 }) {
   const [bookings, setBookings] =
     useState<Booking[]>([]);
@@ -1833,17 +2226,13 @@ function BookingsPage({
 
   async function load() {
     try {
-      const data = await api(
-        `/bookings/trainee/${user.id}`
-      );
-
       setBookings(
-        Array.isArray(data)
-          ? data
-          : []
+        await api<Booking[]>(
+          `/bookings/trainee/${user.id}`
+        )
       );
-    } catch {
-      setBookings([]);
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -1853,7 +2242,7 @@ function BookingsPage({
     load();
   }, [user.id]);
 
-  async function completeLecture(
+  async function complete(
     lectureId: number
   ) {
     try {
@@ -1865,151 +2254,274 @@ function BookingsPage({
       );
 
       await load();
-
-      alert(
-        "Lecture marked as completed."
-      );
     } catch (err: any) {
-      alert(err.message);
+      setError(err.message);
     }
   }
 
+  if (loading) return <Loading />;
+
   return (
-    <div>
+    <div className="space-y-7">
+      <div>
+        <h1 className="text-3xl font-black">
+          📅 My Bookings
+        </h1>
 
-      <Button
-        secondary
-        onClick={onBack}
-      >
-        ← Dashboard
-      </Button>
+        <p className="mt-2 text-slate-500">
+          Your trainer lectures.
+        </p>
+      </div>
 
-      <h1 className="text-3xl font-bold mt-6">
-        My Bookings
-      </h1>
+      {bookings.length === 0 ? (
+        <Card className="p-10 text-center">
+          <div className="text-5xl">
+            📅
+          </div>
 
-      {loading ? (
-        <Spinner />
+          <h2 className="mt-3 text-xl font-black">
+            No bookings yet
+          </h2>
+        </Card>
       ) : (
-        <div className="space-y-4 mt-6">
-
-          {bookings.map(
-            (booking) => (
-              <Card
-                key={booking.booking_id}
-                className="p-5"
-              >
-
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-
-                  <div>
-                    <h2 className="text-lg font-bold">
-                      {booking.topic}
-                    </h2>
-
-                    <p className="text-slate-500">
-                      Trainer:{" "}
-                      {booking.trainer ||
-                        "Trainer"}
-                    </p>
-
-                    <p className="text-sm text-slate-500 mt-2">
-                      {booking.start_time} —{" "}
-                      {booking.end_time}
-                    </p>
+        <div className="space-y-4">
+          {bookings.map((booking) => (
+            <Card
+              key={booking.booking_id}
+              className="p-5"
+            >
+              <div className="flex flex-wrap justify-between gap-4">
+                <div>
+                  <div className="text-xs font-bold uppercase text-indigo-600">
+                    {text(
+                      booking.topic,
+                      "Topic"
+                    )}
                   </div>
 
-                  <div className="text-right">
+                  <h2 className="mt-1 text-lg font-black">
+                    {text(
+                      booking.trainer,
+                      "Trainer"
+                    )}
+                  </h2>
 
-                    <span className="inline-block bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-sm">
-                      {booking.lecture_status ||
-                        booking.status}
-                    </span>
-
-                    {booking.lecture_id &&
-                      booking.lecture_status !==
-                        "completed" && (
-                        <div className="mt-3">
-                          <Button
-                            onClick={() =>
-                              completeLecture(
-                                booking.lecture_id!
-                              )
-                            }
-                          >
-                            Mark Lecture Complete
-                          </Button>
-                        </div>
-                      )}
-
-                  </div>
-
+                  <p className="mt-2 text-sm text-slate-500">
+                    🕐{" "}
+                    {booking.start_time}{" "}
+                    -{" "}
+                    {booking.end_time}
+                  </p>
                 </div>
 
-              </Card>
-            )
-          )}
+                <div>
+                  <span className="rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700">
+                    {text(
+                      booking.lecture_status,
+                      booking.status
+                    )}
+                  </span>
 
-          {bookings.length === 0 && (
-            <Card className="p-8 text-center">
-              <p className="text-slate-500">
-                You haven't booked any lectures yet.
-              </p>
+                  {booking.lecture_id &&
+                    booking.lecture_status !==
+                      "completed" && (
+                      <div className="mt-3">
+                        <Button
+                          onClick={() =>
+                            complete(
+                              booking.lecture_id!
+                            )
+                          }
+                        >
+                          Complete Lecture
+                        </Button>
+                      </div>
+                    )}
+                </div>
+              </div>
             </Card>
-          )}
-
+          ))}
         </div>
       )}
-
     </div>
   );
 }
 
+/* =========================================================
+   PROGRESS
+========================================================= */
 
-// ============================================================
-// PROFILE
-// ============================================================
+function ProgressPage({
+  user,
+  setError,
+}: {
+  user: User;
+  setError: (error: string) => void;
+}) {
+  const [progress, setProgress] =
+    useState<any[]>([]);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  useEffect(() => {
+    api<any[]>(
+      `/progress/${user.id}`
+    )
+      .then(setProgress)
+      .catch((err) =>
+        setError(err.message)
+      )
+      .finally(() =>
+        setLoading(false)
+      );
+  }, [user.id, setError]);
+
+  if (loading) return <Loading />;
+
+  return (
+    <div className="space-y-7">
+      <div>
+        <h1 className="text-3xl font-black">
+          📊 My Progress
+        </h1>
+
+        <p className="mt-2 text-slate-500">
+          Track your test performance.
+        </p>
+      </div>
+
+      {progress.length === 0 ? (
+        <Card className="p-10 text-center">
+          <div className="text-5xl">
+            📈
+          </div>
+
+          <h2 className="mt-3 text-xl font-black">
+            No progress yet
+          </h2>
+
+          <p className="mt-2 text-sm text-slate-500">
+            Take your first MCQ test.
+          </p>
+        </Card>
+      ) : (
+        <div className="space-y-5">
+          {progress.map((attempt) => (
+            <Card
+              key={attempt.attempt_id}
+              className="p-6"
+            >
+              <div className="flex justify-between gap-3">
+                <div>
+                  <div className="text-xs font-bold uppercase text-indigo-600">
+                    {text(
+                      attempt.test_type
+                    )}
+                  </div>
+
+                  <h2 className="mt-1 text-xl font-black">
+                    {text(
+                      attempt.course,
+                      "Course"
+                    )}
+                  </h2>
+                </div>
+
+                <div className="text-3xl font-black text-indigo-600">
+                  {Math.round(
+                    Number(
+                      attempt.score || 0
+                    )
+                  )}
+                  %
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {(attempt.topics ||
+                  []).map(
+                  (topic: any) => (
+                    <div
+                      key={topic.topic}
+                      className="rounded-xl bg-slate-50 p-4"
+                    >
+                      <div className="font-bold">
+                        {text(
+                          topic.topic,
+                          "Topic"
+                        )}
+                      </div>
+
+                      <div className="mt-1 text-xl font-black">
+                        {Math.round(
+                          Number(
+                            topic.percentage ||
+                              0
+                          )
+                        )}
+                        %
+                      </div>
+                    </div>
+                  )
+                )}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
+   PROFILE
+========================================================= */
 
 function ProfilePage({
   user,
-  onUpdated,
-  onBack,
+  setUser,
+  setError,
 }: {
   user: User;
-  onUpdated: (user: User) => void;
-  onBack: () => void;
+  setUser: (user: User) => void;
+  setError: (error: string) => void;
 }) {
   const [name, setName] =
-    useState(user.name || "");
+    useState(text(user.name));
 
   const [bio, setBio] =
-    useState(user.bio || "");
+    useState(text(user.bio));
 
   const [saving, setSaving] =
     useState(false);
 
-  const [error, setError] =
-    useState("");
-
   async function save() {
     setSaving(true);
-    setError("");
 
     try {
-      const data = await api(
-        `/users/${user.id}/profile`,
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            name,
-            bio,
-          }),
-        }
+      const updated =
+        await api<User>(
+          `/users/${user.id}/profile`,
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              name,
+              bio,
+            }),
+          }
+        );
+
+      setUser(updated);
+
+      localStorage.setItem(
+        "skillsphere_user",
+        JSON.stringify(updated)
       );
 
-      onUpdated(data.user);
-
-      alert("Profile updated.");
+      alert(
+        "Profile updated successfully!"
+      );
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -2018,64 +2530,40 @@ function ProfilePage({
   }
 
   return (
-    <div className="max-w-2xl">
+    <div className="mx-auto max-w-3xl">
+      <h1 className="text-3xl font-black">
+        👤 Profile
+      </h1>
 
-      <Button
-        secondary
-        onClick={onBack}
-      >
-        ← Back
-      </Button>
-
-      <Card className="p-7 mt-5">
-
-        <div className="flex items-center gap-4 mb-7">
-          <InitialAvatar
-            name={name}
-            size="large"
-          />
+      <Card className="mt-6 p-6">
+        <div className="mb-6 flex items-center gap-4">
+          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-indigo-100 text-2xl font-black text-indigo-700">
+            {initials(user.name)}
+          </div>
 
           <div>
-            <h1 className="text-2xl font-bold">
-              My Profile
-            </h1>
+            <h2 className="text-xl font-black">
+              {text(
+                user.name,
+                "User"
+              )}
+            </h2>
 
-            <p className="text-slate-500">
-              {user.email}
+            <p className="text-sm text-slate-500">
+              {text(user.email)}
             </p>
           </div>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-5">
+          <Input
+            label="Name"
+            value={name}
+            onChange={setName}
+          />
 
           <div>
-            <label className="block text-sm font-semibold mb-1">
-              Name
-            </label>
-
-            <input
-              value={name}
-              onChange={(e) =>
-                setName(e.target.value)
-              }
-              className="w-full border border-slate-300 rounded-xl px-4 py-3"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Email
-            </label>
-
-            <input
-              value={user.email}
-              disabled
-              className="w-full border border-slate-200 bg-slate-50 rounded-xl px-4 py-3"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
+            <label className="mb-1.5 block text-sm font-semibold">
               Bio
             </label>
 
@@ -2084,65 +2572,50 @@ function ProfilePage({
               onChange={(e) =>
                 setBio(e.target.value)
               }
-              rows={5}
-              className="w-full border border-slate-300 rounded-xl px-4 py-3"
+              className="min-h-28 w-full rounded-xl border border-slate-200 px-4 py-3"
             />
           </div>
 
-          {error && (
-            <div className="bg-red-50 text-red-700 p-3 rounded-xl">
-              {error}
-            </div>
-          )}
-
           <Button
-            disabled={saving}
             onClick={save}
+            disabled={saving}
           >
             {saving
               ? "Saving..."
               : "Save Profile"}
           </Button>
-
         </div>
-
       </Card>
-
     </div>
   );
 }
 
-
-// ============================================================
-// SETTINGS
-// ============================================================
+/* =========================================================
+   SETTINGS
+========================================================= */
 
 function SettingsPage({
   user,
-  onBack,
+  setError,
 }: {
   user: User;
-  onBack: () => void;
+  setError: (error: string) => void;
 }) {
-  const [currentPassword, setCurrentPassword] =
+  const [current, setCurrent] =
     useState("");
 
   const [newPassword, setNewPassword] =
     useState("");
 
-  const [loading, setLoading] =
+  const [saving, setSaving] =
     useState(false);
-
-  const [error, setError] =
-    useState("");
 
   async function changePassword(
     e: React.FormEvent
   ) {
     e.preventDefault();
 
-    setLoading(true);
-    setError("");
+    setSaving(true);
 
     try {
       await api(
@@ -2150,149 +2623,122 @@ function SettingsPage({
         {
           method: "PUT",
           body: JSON.stringify({
-            current_password:
-              currentPassword,
-            new_password:
-              newPassword,
+            current_password: current,
+            new_password: newPassword,
           }),
         }
       );
 
-      alert(
-        "Password changed successfully."
-      );
-
-      setCurrentPassword("");
+      setCurrent("");
       setNewPassword("");
+
+      alert(
+        "Password changed successfully!"
+      );
     } catch (err: any) {
       setError(err.message);
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   }
 
   return (
-    <div className="max-w-2xl">
+    <div className="mx-auto max-w-3xl">
+      <h1 className="text-3xl font-black">
+        ⚙️ Settings
+      </h1>
 
-      <Button
-        secondary
-        onClick={onBack}
-      >
-        ← Back
-      </Button>
-
-      <Card className="p-7 mt-5">
-
-        <h1 className="text-2xl font-bold">
-          Settings
-        </h1>
-
-        <p className="text-slate-500 mt-1">
-          Manage your account security.
-        </p>
+      <Card className="mt-6 p-6">
+        <h2 className="text-xl font-black">
+          Change Password
+        </h2>
 
         <form
           onSubmit={changePassword}
-          className="space-y-4 mt-6"
+          className="mt-6 space-y-5"
         >
+          <Input
+            label="Current Password"
+            type="password"
+            value={current}
+            onChange={setCurrent}
+            required
+          />
 
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Current Password
-            </label>
-
-            <input
-              type="password"
-              value={currentPassword}
-              onChange={(e) =>
-                setCurrentPassword(
-                  e.target.value
-                )
-              }
-              className="w-full border border-slate-300 rounded-xl px-4 py-3"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              New Password
-            </label>
-
-            <input
-              type="password"
-              value={newPassword}
-              onChange={(e) =>
-                setNewPassword(
-                  e.target.value
-                )
-              }
-              className="w-full border border-slate-300 rounded-xl px-4 py-3"
-            />
-          </div>
-
-          {error && (
-            <div className="bg-red-50 text-red-700 p-3 rounded-xl">
-              {error}
-            </div>
-          )}
+          <Input
+            label="New Password"
+            type="password"
+            value={newPassword}
+            onChange={setNewPassword}
+            required
+          />
 
           <Button
             type="submit"
-            disabled={loading}
+            disabled={saving}
           >
-            {loading
-              ? "Changing..."
-              : "Change Password"}
+            {saving
+              ? "Updating..."
+              : "Update Password"}
           </Button>
-
         </form>
-
       </Card>
-
     </div>
   );
 }
 
-
-// ============================================================
-// TRAINER DASHBOARD
-// ============================================================
+/* =========================================================
+   TRAINER DASHBOARD
+========================================================= */
 
 function TrainerDashboard({
   user,
-  onStudent,
-  onProfile,
+  setError,
 }: {
   user: User;
-  onStudent: (
-    studentId: number
-  ) => void;
-  onProfile: () => void;
+  setError: (error: string) => void;
 }) {
   const [data, setData] =
     useState<any>(null);
 
+  const [topics, setTopics] =
+    useState<Topic[]>([]);
+
+  const [slots, setSlots] =
+    useState<Slot[]>([]);
+
+  const [start, setStart] =
+    useState("");
+
+  const [end, setEnd] =
+    useState("");
+
   const [loading, setLoading] =
     useState(true);
 
-  const [startTime, setStartTime] =
-    useState("");
-
-  const [endTime, setEndTime] =
-    useState("");
-
-  const [saving, setSaving] =
-    useState(false);
-
   async function load() {
     try {
-      const result = await api(
-        `/trainers/${user.id}/dashboard`
-      );
+      const [
+        dashboard,
+        topicData,
+        slotData,
+      ] = await Promise.all([
+        api<any>(
+          `/trainers/${user.id}/dashboard`
+        ),
+        api<Topic[]>(
+          `/trainers/${user.id}/topics`
+        ),
+        api<Slot[]>(
+          `/trainers/${user.id}/slots`
+        ),
+      ]);
 
-      setData(result);
-    } catch {
-      setData(null);
+      setData(dashboard);
+      setTopics(topicData);
+      setSlots(slotData);
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -2303,35 +2749,24 @@ function TrainerDashboard({
   }, [user.id]);
 
   async function addSlot() {
-    if (!startTime || !endTime) {
-      alert(
-        "Enter start and end time."
-      );
-      return;
-    }
-
-    setSaving(true);
-
     try {
       await api(
         `/trainers/${user.id}/slots`,
         {
           method: "POST",
           body: JSON.stringify({
-            start_time: startTime,
-            end_time: endTime,
+            start_time: start,
+            end_time: end,
           }),
         }
       );
 
-      setStartTime("");
-      setEndTime("");
+      setStart("");
+      setEnd("");
 
       await load();
     } catch (err: any) {
-      alert(err.message);
-    } finally {
-      setSaving(false);
+      setError(err.message);
     }
   }
 
@@ -2348,545 +2783,164 @@ function TrainerDashboard({
 
       await load();
     } catch (err: any) {
-      alert(err.message);
+      setError(err.message);
     }
   }
 
-  if (loading) {
-    return <Spinner />;
-  }
-
-  if (!data) {
-    return (
-      <Card className="p-8">
-        Unable to load trainer dashboard.
-      </Card>
-    );
-  }
-
-  const stats =
-    data.stats || {};
+  if (loading) return <Loading />;
 
   return (
-    <div>
-
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-
-        <div>
-          <h1 className="text-3xl font-bold">
-            Trainer Dashboard
-          </h1>
-
-          <p className="text-slate-500">
-            Welcome,{" "}
-            {data.profile?.name ||
-              user.name ||
-              "Trainer"}
-          </p>
+    <div className="space-y-7">
+      <div>
+        <div className="text-sm font-bold uppercase text-indigo-600">
+          Trainer Area
         </div>
 
-        <Button
-          secondary
-          onClick={onProfile}
-        >
-          Edit Profile
-        </Button>
-
+        <h1 className="mt-1 text-3xl font-black">
+          Trainer Dashboard
+        </h1>
       </div>
 
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat
+          icon="👥"
+          title="Students"
+          value={
+            data?.stats?.students ||
+            0
+          }
+          onClick={() => {}}
+        />
 
-      {/* STATS */}
+        <Stat
+          icon="📅"
+          title="Bookings"
+          value={
+            data?.stats?.bookings ||
+            0
+          }
+          onClick={() => {}}
+        />
 
-      <div className="grid md:grid-cols-5 gap-4 mt-6">
+        <Stat
+          icon="📚"
+          title="Topics"
+          value={topics.length}
+          onClick={() => {}}
+        />
 
-        {[
-          [
-            "Total Slots",
-            stats.total_slots,
-          ],
-          [
-            "Available",
-            stats.available_slots,
-          ],
-          [
-            "Bookings",
-            stats.total_bookings,
-          ],
-          [
-            "Completed",
-            stats.completed_lectures,
-          ],
-          [
-            "Students",
-            stats.total_students,
-          ],
-        ].map(([label, value]) => (
-          <Card
-            key={String(label)}
-            className="p-5"
-          >
-            <p className="text-sm text-slate-500">
-              {label}
-            </p>
-
-            <p className="text-3xl font-bold mt-1">
-              {value ?? 0}
-            </p>
-          </Card>
-        ))}
-
+        <Stat
+          icon="🕐"
+          title="Slots"
+          value={
+            slots.filter(
+              (s) => s.available
+            ).length
+          }
+          onClick={() => {}}
+        />
       </div>
 
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card className="p-6">
+          <h2 className="text-xl font-black">
+            My Expertise
+          </h2>
 
-      {/* EXPERTISE */}
-
-      <Card className="p-6 mt-6">
-
-        <h2 className="text-xl font-bold">
-          My Expertise
-        </h2>
-
-        <div className="flex flex-wrap gap-2 mt-4">
-
-          {(data.expertise || []).map(
-            (topic: Topic) => (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {topics.map((topic) => (
               <span
                 key={topic.id}
-                className="bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-full text-sm"
+                className="rounded-xl bg-indigo-50 px-3 py-2 text-sm font-bold text-indigo-700"
               >
                 {topic.name}
               </span>
-            )
-          )}
+            ))}
+          </div>
+        </Card>
 
-        </div>
+        <Card className="p-6">
+          <h2 className="text-xl font-black">
+            Add Lecture Slot
+          </h2>
 
-      </Card>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <Input
+              label="Start"
+              value={start}
+              onChange={setStart}
+              placeholder="10:00 AM"
+            />
 
+            <Input
+              label="End"
+              value={end}
+              onChange={setEnd}
+              placeholder="11:00 AM"
+            />
+          </div>
 
-      {/* ADD SLOTS */}
+          <div className="mt-4">
+            <Button
+              onClick={addSlot}
+            >
+              + Add Slot
+            </Button>
+          </div>
+        </Card>
+      </div>
 
-      <Card className="p-6 mt-6">
-
-        <h2 className="text-xl font-bold">
-          Add Lecture Slot
-        </h2>
-
-        <div className="grid md:grid-cols-3 gap-3 mt-4">
-
-          <input
-            value={startTime}
-            onChange={(e) =>
-              setStartTime(
-                e.target.value
-              )
-            }
-            placeholder="e.g. 10:00 AM"
-            className="border border-slate-300 rounded-xl px-4 py-3"
-          />
-
-          <input
-            value={endTime}
-            onChange={(e) =>
-              setEndTime(
-                e.target.value
-              )
-            }
-            placeholder="e.g. 11:00 AM"
-            className="border border-slate-300 rounded-xl px-4 py-3"
-          />
-
-          <Button
-            disabled={saving}
-            onClick={addSlot}
-          >
-            + Add Slot
-          </Button>
-
-        </div>
-
-      </Card>
-
-
-      {/* STUDENTS */}
-
-      <Card className="p-6 mt-6">
-
-        <h2 className="text-xl font-bold">
-          My Students
-        </h2>
-
-        <div className="overflow-x-auto mt-4">
-
-          <table className="w-full text-left">
-
-            <thead>
-              <tr className="border-b border-slate-200 text-sm text-slate-500">
-                <th className="p-3">
-                  Student
-                </th>
-
-                <th className="p-3">
-                  Tests
-                </th>
-
-                <th className="p-3">
-                  Latest Score
-                </th>
-
-                <th className="p-3">
-                  Lectures
-                </th>
-
-                <th className="p-3">
-                  Action
-                </th>
-              </tr>
-            </thead>
-
-            <tbody>
-
-              {(data.students || []).map(
-                (student: any) => (
-                  <tr
-                    key={student.id}
-                    className="border-b border-slate-100"
-                  >
-
-                    <td className="p-3">
-                      <p className="font-semibold">
-                        {student.name}
-                      </p>
-
-                      <p className="text-xs text-slate-500">
-                        {student.email}
-                      </p>
-                    </td>
-
-                    <td className="p-3">
-                      {student.total_tests}
-                    </td>
-
-                    <td className="p-3">
-                      {student.latest_score !==
-                      null
-                        ? `${student.latest_score}%`
-                        : "—"}
-                    </td>
-
-                    <td className="p-3">
-                      {student.completed_lectures}
-                    </td>
-
-                    <td className="p-3">
-                      <Button
-                        secondary
-                        onClick={() =>
-                          onStudent(
-                            student.id
-                          )
-                        }
-                      >
-                        View
-                      </Button>
-                    </td>
-
-                  </tr>
-                )
-              )}
-
-            </tbody>
-
-          </table>
-
-        </div>
-
-        {(data.students || []).length ===
-          0 && (
-          <p className="text-slate-500 mt-4">
-            No students assigned yet.
-          </p>
-        )}
-
-      </Card>
-
-
-      {/* BOOKINGS */}
-
-      <Card className="p-6 mt-6">
-
-        <h2 className="text-xl font-bold">
-          Lecture Bookings
-        </h2>
-
-        <div className="space-y-3 mt-4">
-
-          {(data.bookings || []).map(
-            (booking: any) => (
-              <div
-                key={booking.booking_id}
-                className="border border-slate-200 rounded-xl p-4"
-              >
-
-                <div className="flex flex-col md:flex-row justify-between gap-3">
-
-                  <div>
-                    <p className="font-semibold">
-                      {booking.trainee_name}
-                    </p>
-
-                    <p className="text-sm text-slate-500">
-                      {booking.topic}
-                    </p>
-                  </div>
-
-                  <div className="text-right">
-
-                    <p className="font-semibold">
-                      {booking.start_time} —{" "}
-                      {booking.end_time}
-                    </p>
-
-                    <span className="text-xs text-indigo-600">
-                      {booking.lecture_status}
-                    </span>
-
-                  </div>
-
-                </div>
-
-              </div>
-            )
-          )}
-
-        </div>
-
-      </Card>
-
-
-      {/* SLOT LIST */}
-
-      <Card className="p-6 mt-6">
-
-        <h2 className="text-xl font-bold">
+      <Card className="p-6">
+        <h2 className="text-xl font-black">
           My Slots
         </h2>
 
-        <div className="grid md:grid-cols-2 gap-3 mt-4">
-
-          {(data.bookings || []).length ===
-          0 &&
-          (data.stats?.total_slots || 0) ===
-            0 ? (
-            <p className="text-slate-500">
-              No slots yet.
-            </p>
-          ) : (
-            <p className="text-slate-500">
-              Manage your slots using the booking data above.
-            </p>
-          )}
-
-        </div>
-
-      </Card>
-
-    </div>
-  );
-}
-
-
-// ============================================================
-// STUDENT PROGRESS FOR TRAINER
-// ============================================================
-
-function StudentProgressPage({
-  trainerId,
-  studentId,
-  onBack,
-}: {
-  trainerId: number;
-  studentId: number;
-  onBack: () => void;
-}) {
-  const [data, setData] =
-    useState<any>(null);
-
-  const [loading, setLoading] =
-    useState(true);
-
-  useEffect(() => {
-    api(
-      `/trainers/${trainerId}/students/${studentId}/progress`
-    )
-      .then(setData)
-      .catch(() => setData(null))
-      .finally(() =>
-        setLoading(false)
-      );
-  }, [trainerId, studentId]);
-
-  if (loading) {
-    return <Spinner />;
-  }
-
-  if (!data) {
-    return (
-      <Card className="p-7">
-        Unable to load student progress.
-      </Card>
-    );
-  }
-
-  return (
-    <div>
-
-      <Button
-        secondary
-        onClick={onBack}
-      >
-        ← Trainer Dashboard
-      </Button>
-
-      <Card className="p-6 mt-5">
-
-        <h1 className="text-3xl font-bold">
-          {data.student?.name}
-        </h1>
-
-        <p className="text-slate-500">
-          {data.student?.email}
-        </p>
-
-        <p className="text-slate-600 mt-3">
-          {data.student?.bio ||
-            "No bio available."}
-        </p>
-
-      </Card>
-
-
-      <Card className="p-6 mt-5">
-
-        <h2 className="text-xl font-bold">
-          Test History
-        </h2>
-
-        <div className="space-y-4 mt-4">
-
-          {(data.tests || []).map(
-            (test: any) => (
-              <div
-                key={test.attempt_id}
-                className="border border-slate-200 rounded-xl p-5"
-              >
-
-                <div className="flex justify-between">
-
-                  <div>
-                    <p className="font-bold">
-                      {test.course}
-                    </p>
-
-                    <p className="text-sm text-slate-500">
-                      {test.test_type}
-                    </p>
-                  </div>
-
-                  <p className="text-2xl font-bold text-indigo-600">
-                    {test.score}%
-                  </p>
-
-                </div>
-
-                <div className="flex flex-wrap gap-2 mt-4">
-
-                  {(test.topics || []).map(
-                    (topic: any) => (
-                      <span
-                        key={topic.topic_id}
-                        className={`px-3 py-1 rounded-full text-sm ${
-                          topic.percentage <
-                          60
-                            ? "bg-red-50 text-red-700"
-                            : "bg-green-50 text-green-700"
-                        }`}
-                      >
-                        {topic.topic}:{" "}
-                        {topic.percentage}%
-                      </span>
-                    )
-                  )}
-
-                </div>
-
+        <div className="mt-5 space-y-3">
+          {slots.map((slot) => (
+            <div
+              key={slot.id}
+              className="flex flex-wrap justify-between gap-3 rounded-xl border p-4"
+            >
+              <div className="font-bold">
+                🕐{" "}
+                {slot.start_time} -{" "}
+                {slot.end_time}
               </div>
-            )
-          )}
 
-        </div>
-
-        {(data.tests || []).length ===
-          0 && (
-          <p className="text-slate-500 mt-4">
-            No test attempts yet.
-          </p>
-        )}
-
-      </Card>
-
-
-      <Card className="p-6 mt-5">
-
-        <h2 className="text-xl font-bold">
-          Lecture History
-        </h2>
-
-        <div className="space-y-3 mt-4">
-
-          {(data.lectures || []).map(
-            (lecture: any) => (
-              <div
-                key={lecture.booking_id}
-                className="border border-slate-200 rounded-xl p-4 flex justify-between"
-              >
-
-                <div>
-                  <p className="font-semibold">
-                    {lecture.topic}
-                  </p>
-
-                  <p className="text-sm text-slate-500">
-                    {lecture.start_time} —{" "}
-                    {lecture.end_time}
-                  </p>
-                </div>
-
-                <span className="text-sm font-semibold text-indigo-600">
-                  {lecture.status}
+              <div className="flex gap-2">
+                <span className="rounded-lg bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
+                  {slot.available
+                    ? "Available"
+                    : "Booked"}
                 </span>
 
+                <Button
+                  variant="danger"
+                  onClick={() =>
+                    deleteSlot(
+                      slot.id
+                    )
+                  }
+                >
+                  Delete
+                </Button>
               </div>
-            )
-          )}
-
+            </div>
+          ))}
         </div>
-
       </Card>
-
     </div>
   );
 }
 
-
-// ============================================================
-// ADMIN DASHBOARD
-// ============================================================
+/* =========================================================
+   ADMIN
+========================================================= */
 
 function AdminDashboard({
-  onBack,
+  setError,
 }: {
-  onBack: () => void;
+  setError: (error: string) => void;
 }) {
   const [data, setData] =
     useState<any>(null);
@@ -2895,609 +2949,97 @@ function AdminDashboard({
     useState(true);
 
   useEffect(() => {
-    api("/admin/dashboard")
+    api<any>("/admin/dashboard")
       .then(setData)
-      .catch(() => setData(null))
+      .catch((err) =>
+        setError(err.message)
+      )
       .finally(() =>
         setLoading(false)
       );
-  }, []);
+  }, [setError]);
 
-  if (loading) {
-    return <Spinner />;
-  }
-
-  if (!data) {
-    return (
-      <Card className="p-7">
-        Unable to load admin dashboard.
-      </Card>
-    );
-  }
+  if (loading) return <Loading />;
 
   return (
-    <div>
-
-      <Button
-        secondary
-        onClick={onBack}
-      >
-        ← Dashboard
-      </Button>
-
-      <h1 className="text-3xl font-bold mt-6">
-        Admin Dashboard
-      </h1>
-
-      <div className="grid md:grid-cols-4 gap-5 mt-6">
-
-        <Card className="p-6">
-          <p className="text-slate-500">
-            Trainees
-          </p>
-          <p className="text-4xl font-bold mt-1">
-            {data.users?.trainees || 0}
-          </p>
-        </Card>
-
-        <Card className="p-6">
-          <p className="text-slate-500">
-            Trainers
-          </p>
-          <p className="text-4xl font-bold mt-1">
-            {data.users?.trainers || 0}
-          </p>
-        </Card>
-
-        <Card className="p-6">
-          <p className="text-slate-500">
-            Courses
-          </p>
-          <p className="text-4xl font-bold mt-1">
-            {data.courses || 0}
-          </p>
-        </Card>
-
-        <Card className="p-6">
-          <p className="text-slate-500">
-            Bookings
-          </p>
-          <p className="text-4xl font-bold mt-1">
-            {data.bookings || 0}
-          </p>
-        </Card>
-
-      </div>
-
-      <Card className="p-7 mt-6">
-
-        <h2 className="text-xl font-bold">
-          Platform Overview
-        </h2>
-
-        <div className="grid md:grid-cols-3 gap-4 mt-5">
-
-          <div className="bg-slate-50 rounded-xl p-5">
-            <p className="text-sm text-slate-500">
-              Admin Accounts
-            </p>
-            <p className="text-2xl font-bold mt-1">
-              {data.users?.admins || 0}
-            </p>
-          </div>
-
-          <div className="bg-slate-50 rounded-xl p-5">
-            <p className="text-sm text-slate-500">
-              MCQ Questions
-            </p>
-            <p className="text-2xl font-bold mt-1">
-              {data.questions || 0}
-            </p>
-          </div>
-
-          <div className="bg-slate-50 rounded-xl p-5">
-            <p className="text-sm text-slate-500">
-              Total Users
-            </p>
-            <p className="text-2xl font-bold mt-1">
-              {(data.users?.trainees ||
-                0) +
-                (data.users?.trainers ||
-                  0) +
-                (data.users?.admins ||
-                  0)}
-            </p>
-          </div>
-
+    <div className="space-y-7">
+      <div>
+        <div className="text-sm font-bold uppercase text-red-500">
+          Administration
         </div>
 
-      </Card>
+        <h1 className="mt-1 text-3xl font-black">
+          Admin Dashboard
+        </h1>
+      </div>
 
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <AdminStat
+          icon="👥"
+          title="Users"
+          value={
+            data?.users ||
+            data?.total_users ||
+            0
+          }
+        />
+
+        <AdminStat
+          icon="📚"
+          title="Courses"
+          value={
+            data?.courses ||
+            data?.total_courses ||
+            0
+          }
+        />
+
+        <AdminStat
+          icon="📝"
+          title="Questions"
+          value={
+            data?.questions ||
+            data?.total_questions ||
+            0
+          }
+        />
+
+        <AdminStat
+          icon="📅"
+          title="Bookings"
+          value={
+            data?.bookings ||
+            data?.total_bookings ||
+            0
+          }
+        />
+      </div>
     </div>
   );
 }
 
-
-// ============================================================
-// MAIN APP
-// ============================================================
-
-export default function App() {
-
-  const [user, setUser] =
-    useState<User | null>(() => {
-      try {
-        const saved =
-          localStorage.getItem(
-            "skillsphere_user"
-          );
-
-        return saved
-          ? JSON.parse(saved)
-          : null;
-      } catch {
-        return null;
-      }
-    });
-
-  const [page, setPage] =
-    useState<Page>("dashboard");
-
-  const [selectedCourse, setSelectedCourse] =
-    useState<Course | null>(null);
-
-  const [attemptResult, setAttemptResult] =
-    useState<AttemptResult | null>(null);
-
-  const [selectedTrainer, setSelectedTrainer] =
-    useState<Trainer | null>(null);
-
-  const [selectedTopic, setSelectedTopic] =
-    useState<Topic | null>(null);
-
-  const [selectedStudentId, setSelectedStudentId] =
-    useState<number | null>(null);
-
-
-  function login(userData: User) {
-    setUser(userData);
-
-    localStorage.setItem(
-      "skillsphere_user",
-      JSON.stringify(userData)
-    );
-
-    if (userData.role === "trainer") {
-      setPage("trainer-dashboard");
-    } else if (
-      userData.role === "admin"
-    ) {
-      setPage("admin");
-    } else {
-      setPage("dashboard");
-    }
-  }
-
-
-  function logout() {
-    localStorage.removeItem(
-      "skillsphere_user"
-    );
-
-    setUser(null);
-    setPage("dashboard");
-
-    setSelectedCourse(null);
-    setAttemptResult(null);
-    setSelectedTrainer(null);
-    setSelectedTopic(null);
-  }
-
-
-  function updateUser(
-    updated: User
-  ) {
-    setUser(updated);
-
-    localStorage.setItem(
-      "skillsphere_user",
-      JSON.stringify(updated)
-    );
-  }
-
-
-  function selectCourse(
-    course: Course
-  ) {
-    setSelectedCourse(course);
-    setPage("test");
-  }
-
-
-  async function testFinished(
-    attemptId: number
-  ) {
-    try {
-      const result =
-        await api(
-          `/attempts/${attemptId}/result`
-        );
-
-      setAttemptResult(result);
-      setPage("result");
-    } catch (err: any) {
-      alert(
-        err?.message ||
-          "Unable to load result."
-      );
-    }
-  }
-
-
-  function selectTrainer(
-    trainer: Trainer
-  ) {
-    setSelectedTrainer(trainer);
-    setPage("teacher");
-  }
-
-
-  function selectTopic(
-    trainer: Trainer,
-    topic: Topic
-  ) {
-    setSelectedTrainer(trainer);
-    setSelectedTopic(topic);
-    setPage("booking");
-  }
-
-
-  if (!user) {
-    return (
-      <AuthPage
-        onLogin={login}
-      />
-    );
-  }
-
-
-  // ==========================================================
-  // PAGE CONTENT
-  // ==========================================================
-
-  let content: React.ReactNode = null;
-
-  if (
-    page === "dashboard" &&
-    user.role === "trainee"
-  ) {
-    content = (
-      <TraineeDashboard
-        user={user}
-        onNavigate={setPage}
-      />
-    );
-  }
-
-  else if (
-    page === "courses" &&
-    user.role === "trainee"
-  ) {
-    content = (
-      <CoursesPage
-        onSelect={selectCourse}
-        onBack={() =>
-          setPage("dashboard")
-        }
-      />
-    );
-  }
-
-  else if (
-    page === "test" &&
-    selectedCourse &&
-    user.role === "trainee"
-  ) {
-    content = (
-      <TestPage
-        user={user}
-        course={selectedCourse}
-        onFinished={testFinished}
-        onBack={() =>
-          setPage("courses")
-        }
-      />
-    );
-  }
-
-  else if (
-    page === "result" &&
-    attemptResult &&
-    user.role === "trainee"
-  ) {
-    content = (
-      <ResultPage
-        result={attemptResult}
-        onTeachers={() =>
-          setPage("teachers")
-        }
-        onDashboard={() =>
-          setPage("dashboard")
-        }
-      />
-    );
-  }
-
-  else if (
-    page === "teachers" &&
-    user.role === "trainee"
-  ) {
-    content = (
-      <TeachersPage
-        onSelect={selectTrainer}
-        onBack={() =>
-          setPage("dashboard")
-        }
-      />
-    );
-  }
-
-  else if (
-    page === "teacher" &&
-    selectedTrainer &&
-    user.role === "trainee"
-  ) {
-    content = (
-      <TeacherPage
-        trainer={selectedTrainer}
-        onBook={selectTopic}
-        onBack={() =>
-          setPage("teachers")
-        }
-      />
-    );
-  }
-
-  else if (
-    page === "booking" &&
-    selectedTrainer &&
-    selectedTopic &&
-    user.role === "trainee"
-  ) {
-    content = (
-      <BookingPage
-        user={user}
-        trainer={selectedTrainer}
-        topic={selectedTopic}
-        onDone={() =>
-          setPage("bookings")
-        }
-        onBack={() =>
-          setPage("teacher")
-        }
-      />
-    );
-  }
-
-  else if (
-    page === "bookings" &&
-    user.role === "trainee"
-  ) {
-    content = (
-      <BookingsPage
-        user={user}
-        onBack={() =>
-          setPage("dashboard")
-        }
-      />
-    );
-  }
-
-  else if (page === "profile") {
-    content = (
-      <ProfilePage
-        user={user}
-        onUpdated={updateUser}
-        onBack={() =>
-          setPage(
-            user.role === "trainer"
-              ? "trainer-dashboard"
-              : user.role === "admin"
-              ? "admin"
-              : "dashboard"
-          )
-        }
-      />
-    );
-  }
-
-  else if (page === "settings") {
-    content = (
-      <SettingsPage
-        user={user}
-        onBack={() =>
-          setPage(
-            user.role === "trainer"
-              ? "trainer-dashboard"
-              : user.role === "admin"
-              ? "admin"
-              : "dashboard"
-          )
-        }
-      />
-    );
-  }
-
-  else if (
-    page === "trainer-dashboard" &&
-    user.role === "trainer"
-  ) {
-    content = (
-      <TrainerDashboard
-        user={user}
-        onStudent={(studentId) => {
-          setSelectedStudentId(
-            studentId
-          );
-
-          setPage(
-            "student-progress"
-          );
-        }}
-        onProfile={() =>
-          setPage("profile")
-        }
-      />
-    );
-  }
-
-  else if (
-    page === "student-progress" &&
-    user.role === "trainer" &&
-    selectedStudentId
-  ) {
-    content = (
-      <StudentProgressPage
-        trainerId={user.id}
-        studentId={selectedStudentId}
-        onBack={() =>
-          setPage(
-            "trainer-dashboard"
-          )
-        }
-      />
-    );
-  }
-
-  else if (
-    page === "admin" &&
-    user.role === "admin"
-  ) {
-    content = (
-      <AdminDashboard
-        onBack={() =>
-          setPage("admin")
-        }
-      />
-    );
-  }
-
-  else {
-    content = (
-      <TraineeDashboard
-        user={user}
-        onNavigate={setPage}
-      />
-    );
-  }
-
-
-  // ==========================================================
-  // NAVIGATION
-  // ==========================================================
-
-  const navButtons = useMemo(() => {
-
-    if (user.role === "trainer") {
-      return [
-        {
-          label: "Dashboard",
-          page: "trainer-dashboard" as Page,
-        },
-        {
-          label: "Profile",
-          page: "profile" as Page,
-        },
-        {
-          label: "Settings",
-          page: "settings" as Page,
-        },
-      ];
-    }
-
-    if (user.role === "admin") {
-      return [
-        {
-          label: "Admin Dashboard",
-          page: "admin" as Page,
-        },
-        {
-          label: "Profile",
-          page: "profile" as Page,
-        },
-        {
-          label: "Settings",
-          page: "settings" as Page,
-        },
-      ];
-    }
-
-    return [
-      {
-        label: "Dashboard",
-        page: "dashboard" as Page,
-      },
-      {
-        label: "Courses",
-        page: "courses" as Page,
-      },
-      {
-        label: "Teachers",
-        page: "teachers" as Page,
-      },
-      {
-        label: "My Bookings",
-        page: "bookings" as Page,
-      },
-    ];
-  }, [user.role]);
-
-
+function AdminStat({
+  icon,
+  title,
+  value,
+}: {
+  icon: string;
+  title: string;
+  value: React.ReactNode;
+}) {
   return (
-    <div className="min-h-screen bg-slate-50">
-
-      <Header
-        user={user}
-        onNavigate={setPage}
-        onLogout={logout}
-      />
-
-      <div className="max-w-7xl mx-auto px-4 md:px-6 py-6">
-
-        {/* NAV */}
-
-        <div className="flex gap-2 overflow-x-auto pb-3 mb-6">
-
-          {navButtons.map(
-            (item) => (
-              <button
-                key={item.page}
-                onClick={() =>
-                  setPage(item.page)
-                }
-                className={`whitespace-nowrap px-4 py-2 rounded-xl text-sm font-semibold ${
-                  page === item.page
-                    ? "bg-indigo-600 text-white"
-                    : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                {item.label}
-              </button>
-            )
-          )}
-
-        </div>
-
-        {content}
-
+    <Card className="p-5">
+      <div className="text-2xl">
+        {icon}
       </div>
 
-      <footer className="border-t border-slate-200 bg-white mt-12">
-        <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 text-center text-sm text-slate-400">
-          © 2026 SkillSphere • Competency-Based Learning Platform
-        </div>
-      </footer>
+      <div className="mt-4 text-3xl font-black">
+        {value}
+      </div>
 
-    </div>
+      <div className="mt-1 text-sm text-slate-500">
+        {title}
+      </div>
+    </Card>
   );
 }
