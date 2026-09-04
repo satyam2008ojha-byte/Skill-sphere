@@ -45,6 +45,7 @@ type TopicResult = {
 
 type WeakTopic = {
   topic_id: number;
+  topic?: string;
   percentage: number;
 };
 
@@ -74,25 +75,68 @@ type DetailedResult = {
   topics: TopicResult[];
 };
 
+/* =========================================================
+   API HELPER
+========================================================= */
+
 async function apiRequest(
   endpoint: string,
   options: RequestInit = {}
 ) {
-  const response = await fetch(`${API_URL}${endpoint}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
+  const url = `${API_URL}${endpoint}`;
 
-  if (!response.ok) {
+  console.log("API REQUEST:", url);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+    });
+
+    console.log("API STATUS:", response.status);
+
     const text = await response.text();
-    throw new Error(text || `API Error ${response.status}`);
-  }
 
-  return response.json();
+    let data: any = null;
+
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = text;
+    }
+
+    if (!response.ok) {
+      console.error("API ERROR:", data);
+
+      if (
+        typeof data === "object" &&
+        data !== null &&
+        data.detail
+      ) {
+        throw new Error(data.detail);
+      }
+
+      throw new Error(
+        typeof data === "string"
+          ? data
+          : `API Error ${response.status}`
+      );
+    }
+
+    return data;
+  } catch (error) {
+    console.error("FETCH ERROR:", error);
+    throw error;
+  }
 }
+
+/* =========================================================
+   BUTTON
+========================================================= */
 
 function Button({
   children,
@@ -124,6 +168,10 @@ function Button({
   );
 }
 
+/* =========================================================
+   CARD
+========================================================= */
+
 function Card({
   children,
   className = "",
@@ -139,6 +187,10 @@ function Card({
     </div>
   );
 }
+
+/* =========================================================
+   HEADER
+========================================================= */
 
 function Header({
   onHome,
@@ -160,6 +212,10 @@ function Header({
     </header>
   );
 }
+
+/* =========================================================
+   APP
+========================================================= */
 
 export default function App() {
   const [stage, setStage] =
@@ -234,31 +290,42 @@ export default function App() {
   const [currentWeakTopic, setCurrentWeakTopic] =
     useState<WeakTopic | null>(null);
 
-  // ------------------------------------------------------------
-  // LOAD COURSES
-  // ------------------------------------------------------------
+  /* =========================================================
+     LOAD COURSES
+  ========================================================= */
 
   const loadCourses = async () => {
     try {
       setLoading(true);
+      setMessage("");
 
       const data = await apiRequest("/courses");
 
       setCourses(data);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      setMessage("Unable to load courses.");
+
+      setMessage(
+        error?.message ||
+          "Unable to load courses."
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  // ------------------------------------------------------------
-  // LOGIN
-  // ------------------------------------------------------------
+  /* =========================================================
+     LOGIN
+  ========================================================= */
 
   const handleLogin = async () => {
-    if (!email || !password) {
+    const cleanEmail =
+      email.trim().toLowerCase();
+
+    const cleanPassword =
+      password.trim();
+
+    if (!cleanEmail || !cleanPassword) {
       setLoginError(
         "Please enter email and password."
       );
@@ -268,16 +335,27 @@ export default function App() {
     try {
       setLoading(true);
       setLoginError("");
+      setMessage("");
+
+      console.log(
+        "LOGIN EMAIL:",
+        cleanEmail
+      );
 
       const data = await apiRequest(
         "/auth/login",
         {
           method: "POST",
           body: JSON.stringify({
-            email,
-            password,
+            email: cleanEmail,
+            password: cleanPassword,
           }),
         }
+      );
+
+      console.log(
+        "LOGIN SUCCESS:",
+        data
       );
 
       setUser(data);
@@ -285,24 +363,37 @@ export default function App() {
       if (data.role === "trainee") {
         await loadCourses();
         setStage("courses");
-      } else if (data.role === "trainer") {
+      } else if (
+        data.role === "trainer"
+      ) {
         setStage("trainer");
-      } else {
+      } else if (
+        data.role === "admin"
+      ) {
         setStage("admin");
+      } else {
+        setLoginError(
+          "Unknown user role received."
+        );
       }
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      console.error(
+        "LOGIN ERROR:",
+        error
+      );
+
       setLoginError(
-        "Invalid email or password."
+        error?.message ||
+          "Unable to connect to SkillSphere server."
       );
     } finally {
       setLoading(false);
     }
   };
 
-  // ------------------------------------------------------------
-  // START COURSE
-  // ------------------------------------------------------------
+  /* =========================================================
+     START COURSE
+  ========================================================= */
 
   const startCourse = async (
     selectedCourse: Course
@@ -311,9 +402,10 @@ export default function App() {
       setLoading(true);
       setMessage("");
 
-      const data = await apiRequest(
-        `/courses/${selectedCourse.id}/questions`
-      );
+      const data =
+        await apiRequest(
+          `/courses/${selectedCourse.id}/questions`
+        );
 
       setCourse(selectedCourse);
       setQuestions(data);
@@ -334,20 +426,24 @@ export default function App() {
       setSelectedSlot(null);
       setSlots([]);
 
+      setCurrentWeakTopic(null);
+
       setStage("pretest");
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
+
       setMessage(
-        "Unable to load test questions."
+        error?.message ||
+          "Unable to load test questions."
       );
     } finally {
       setLoading(false);
     }
   };
 
-  // ------------------------------------------------------------
-  // SUBMIT TEST
-  // ------------------------------------------------------------
+  /* =========================================================
+     SUBMIT TEST
+  ========================================================= */
 
   const submitTest = async (
     testType: "pre" | "post"
@@ -376,7 +472,8 @@ export default function App() {
       const formattedAnswers =
         questions.map((question) => ({
           question_id: question.id,
-          answer: currentAnswers[question.id],
+          answer:
+            currentAnswers[question.id],
         }));
 
       const data: TestResult =
@@ -390,43 +487,64 @@ export default function App() {
           }),
         });
 
+      const detailed: DetailedResult =
+        await apiRequest(
+          `/attempts/${data.attempt_id}/result`
+        );
+
       if (testType === "pre") {
         setPreScore(data.score);
-        setWeakTopics(data.weak_topics);
 
-        const detailed: DetailedResult =
-          await apiRequest(
-            `/attempts/${data.attempt_id}/result`
-          );
+        setWeakTopics(
+          data.weak_topics.map(
+            (item: WeakTopic) => {
+              const matchingTopic =
+                detailed.topics.find(
+                  (topic) =>
+                    topic.topic_id ===
+                    item.topic_id
+                );
 
-        setPreTopicResults(detailed.topics);
+              return {
+                ...item,
+                topic:
+                  matchingTopic?.topic ||
+                  item.topic ||
+                  "Unknown Topic",
+              };
+            }
+          )
+        );
+
+        setPreTopicResults(
+          detailed.topics
+        );
 
         setStage("result");
       } else {
         setPostScore(data.score);
 
-        const detailed: DetailedResult =
-          await apiRequest(
-            `/attempts/${data.attempt_id}/result`
-          );
-
-        setPostTopicResults(detailed.topics);
+        setPostTopicResults(
+          detailed.topics
+        );
 
         setStage("final");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
+
       setMessage(
-        "Unable to submit test. Please try again."
+        error?.message ||
+          "Unable to submit test. Please try again."
       );
     } finally {
       setLoading(false);
     }
   };
 
-  // ------------------------------------------------------------
-  // GET RECOMMENDED TRAINER
-  // ------------------------------------------------------------
+  /* =========================================================
+     FIND TRAINER
+  ========================================================= */
 
   const findTrainer = async (
     topic: WeakTopic
@@ -440,14 +558,18 @@ export default function App() {
           `/trainers/recommended/${topic.topic_id}`
         );
 
-      if (!data || data.length === 0) {
+      if (
+        !data ||
+        data.length === 0
+      ) {
         setMessage(
           "No trainer found for this topic."
         );
         return;
       }
 
-      const trainer: Trainer = data[0];
+      const trainer: Trainer =
+        data[0];
 
       setSelectedTrainer(trainer);
       setCurrentWeakTopic(topic);
@@ -458,23 +580,24 @@ export default function App() {
         );
 
       setSlots(trainerSlots);
-
       setSelectedSlot(null);
 
       setStage("booking");
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
+
       setMessage(
-        "Unable to find a trainer."
+        error?.message ||
+          "Unable to find a trainer."
       );
     } finally {
       setLoading(false);
     }
   };
 
-  // ------------------------------------------------------------
-  // BOOK SLOT
-  // ------------------------------------------------------------
+  /* =========================================================
+     BOOK LECTURE
+  ========================================================= */
 
   const bookLecture = async () => {
     if (
@@ -495,30 +618,38 @@ export default function App() {
           method: "POST",
           body: JSON.stringify({
             trainee_id: user.id,
-            trainer_id: selectedTrainer.id,
+            trainer_id:
+              selectedTrainer.id,
             slot_id: selectedSlot.id,
-            topic_id: currentWeakTopic.topic_id,
+            topic_id:
+              currentWeakTopic.topic_id,
           }),
         });
 
-      setBookingId(data.booking_id);
-      setLectureId(data.lecture_id);
+      setBookingId(
+        data.booking_id
+      );
+
+      setLectureId(
+        data.lecture_id
+      );
 
       setStage("lecture");
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
 
       setMessage(
-        "This slot is no longer available."
+        error?.message ||
+          "This slot is no longer available."
       );
     } finally {
       setLoading(false);
     }
   };
 
-  // ------------------------------------------------------------
-  // COMPLETE LECTURE
-  // ------------------------------------------------------------
+  /* =========================================================
+     COMPLETE LECTURE
+  ========================================================= */
 
   const completeLecture = async () => {
     if (!lectureId) return;
@@ -538,63 +669,74 @@ export default function App() {
       setIndex(0);
 
       setStage("posttest");
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
 
       setMessage(
-        "Unable to complete lecture."
+        error?.message ||
+          "Unable to complete lecture."
       );
     } finally {
       setLoading(false);
     }
   };
 
-  // ------------------------------------------------------------
-  // TOPIC IMPROVEMENT
-  // ------------------------------------------------------------
+  /* =========================================================
+     TOPIC IMPROVEMENT
+  ========================================================= */
 
-  const topicImprovement = useMemo(() => {
-    const map: Record<
-      string,
-      {
-        before: number;
-        after: number;
-      }
-    > = {};
+  const topicImprovement =
+    useMemo(() => {
+      const map: Record<
+        string,
+        {
+          before: number;
+          after: number;
+        }
+      > = {};
 
-    preTopicResults.forEach((item) => {
-      map[item.topic] = {
-        before: item.percentage,
-        after: 0,
-      };
-    });
+      preTopicResults.forEach(
+        (item) => {
+          map[item.topic] = {
+            before:
+              item.percentage,
+            after: 0,
+          };
+        }
+      );
 
-    postTopicResults.forEach((item) => {
-      if (!map[item.topic]) {
-        map[item.topic] = {
-          before: 0,
-          after: item.percentage,
-        };
-      } else {
-        map[item.topic].after =
-          item.percentage;
-      }
-    });
+      postTopicResults.forEach(
+        (item) => {
+          if (!map[item.topic]) {
+            map[item.topic] = {
+              before: 0,
+              after:
+                item.percentage,
+            };
+          } else {
+            map[item.topic].after =
+              item.percentage;
+          }
+        }
+      );
 
-    return Object.entries(map);
-  }, [
-    preTopicResults,
-    postTopicResults,
-  ]);
+      return Object.entries(map);
+    }, [
+      preTopicResults,
+      postTopicResults,
+    ]);
 
-  // ------------------------------------------------------------
-  // QUIZ UI
-  // ------------------------------------------------------------
+  /* =========================================================
+     QUIZ
+  ========================================================= */
 
   const renderQuiz = (
     isPost: boolean
   ) => {
-    if (!course || questions.length === 0) {
+    if (
+      !course ||
+      questions.length === 0
+    ) {
       return (
         <div className="min-h-screen flex items-center justify-center">
           Loading questions...
@@ -611,28 +753,42 @@ export default function App() {
         : answers;
 
     const selectedAnswer =
-      currentAnswers[currentQuestion.id];
+      currentAnswers[
+        currentQuestion.id
+      ];
 
     const setAnswer = (
       value: string
     ) => {
       if (isPost) {
-        setPostAnswers((prev) => ({
-          ...prev,
-          [currentQuestion.id]:
-            value,
-        }));
+        setPostAnswers(
+          (prev) => ({
+            ...prev,
+            [currentQuestion.id]:
+              value,
+          })
+        );
       } else {
-        setAnswers((prev) => ({
-          ...prev,
-          [currentQuestion.id]:
-            value,
-        }));
+        setAnswers(
+          (prev) => ({
+            ...prev,
+            [currentQuestion.id]:
+              value,
+          })
+        );
       }
     };
 
     const isLast =
-      index === questions.length - 1;
+      index ===
+      questions.length - 1;
+
+    const currentTopic =
+      preTopicResults.find(
+        (topic) =>
+          topic.topic_id ===
+          currentQuestion.topic_id
+      );
 
     return (
       <div className="min-h-screen bg-[#F5F7FA]">
@@ -645,6 +801,7 @@ export default function App() {
         <main className="max-w-3xl mx-auto p-6">
 
           <div className="flex justify-between mb-5">
+
             <div>
               <p className="text-sm text-gray-500">
                 {isPost
@@ -654,18 +811,21 @@ export default function App() {
               </p>
 
               <h2 className="text-2xl font-bold">
-                Question {index + 1} of{" "}
+                Question{" "}
+                {index + 1} of{" "}
                 {questions.length}
               </h2>
             </div>
 
             <span className="px-3 py-2 bg-blue-50 text-[#1F5F95] rounded-lg text-sm font-medium">
-              Topic ID:{" "}
-              {currentQuestion.topic_id}
+              {currentTopic?.topic ||
+                `Topic ${currentQuestion.topic_id}`}
             </span>
+
           </div>
 
           <div className="h-2 bg-gray-200 rounded-full mb-6">
+
             <div
               className="h-2 bg-[#1F5F95] rounded-full"
               style={{
@@ -676,6 +836,7 @@ export default function App() {
                 }%`,
               }}
             />
+
           </div>
 
           <Card className="p-7">
@@ -687,52 +848,52 @@ export default function App() {
             <div className="space-y-3">
 
               {currentQuestion.options.map(
-                (option, optionIndex) => (
-                  <label
-                    key={optionIndex}
-                    className={`flex gap-3 p-4 border rounded-lg cursor-pointer ${
-                      selectedAnswer ===
-                      String(
-                        String.fromCharCode(
-                          65 +
-                            optionIndex
-                        )
-                      )
-                        ? "border-[#1F5F95] bg-blue-50"
-                        : "border-gray-200"
-                    }`}
-                  >
+                (
+                  option,
+                  optionIndex
+                ) => {
 
-                    <input
-                      type="radio"
-                      name={`question-${currentQuestion.id}`}
-                      checked={
+                  const letter =
+                    String.fromCharCode(
+                      65 +
+                        optionIndex
+                    );
+
+                  return (
+                    <label
+                      key={
+                        optionIndex
+                      }
+                      className={`flex gap-3 p-4 border rounded-lg cursor-pointer ${
                         selectedAnswer ===
-                        String.fromCharCode(
-                          65 +
-                            optionIndex
-                        )
-                      }
-                      onChange={() =>
-                        setAnswer(
-                          String.fromCharCode(
-                            65 +
-                              optionIndex
+                        letter
+                          ? "border-[#1F5F95] bg-blue-50"
+                          : "border-gray-200"
+                      }`}
+                    >
+
+                      <input
+                        type="radio"
+                        name={`question-${currentQuestion.id}`}
+                        checked={
+                          selectedAnswer ===
+                          letter
+                        }
+                        onChange={() =>
+                          setAnswer(
+                            letter
                           )
-                        )
-                      }
-                    />
+                        }
+                      />
 
-                    <span>
-                      {String.fromCharCode(
-                        65 +
-                          optionIndex
-                      )}
-                      . {option}
-                    </span>
+                      <span>
+                        {letter}.{" "}
+                        {option}
+                      </span>
 
-                  </label>
-                )
+                    </label>
+                  );
+                }
               )}
 
             </div>
@@ -749,7 +910,9 @@ export default function App() {
 
             <Button
               secondary
-              disabled={index === 0}
+              disabled={
+                index === 0
+              }
               onClick={() =>
                 setIndex(
                   index - 1
@@ -799,9 +962,9 @@ export default function App() {
     );
   };
 
-  // ------------------------------------------------------------
-  // LANDING
-  // ------------------------------------------------------------
+  /* =========================================================
+     LANDING
+  ========================================================= */
 
   if (stage === "landing") {
     return (
@@ -829,14 +992,16 @@ export default function App() {
 
             <p className="text-gray-600 text-lg mt-5">
               Select a course, take a
-              topic-wise diagnostic test,
-              find your skill gaps, get
-              matched with a trainer,
-              attend a focused lecture
-              and measure your improvement.
+              topic-wise diagnostic
+              test, find your skill
+              gaps, get matched with a
+              trainer, attend a focused
+              lecture and measure your
+              improvement.
             </p>
 
             <div className="mt-7">
+
               <Button
                 onClick={() =>
                   setStage("login")
@@ -844,6 +1009,7 @@ export default function App() {
               >
                 Get Started →
               </Button>
+
             </div>
 
           </div>
@@ -894,6 +1060,7 @@ export default function App() {
                   </span>
 
                   <div>
+
                     <b>
                       {item[1]}
                     </b>
@@ -901,6 +1068,7 @@ export default function App() {
                     <p className="text-sm text-gray-500">
                       {item[2]}
                     </p>
+
                   </div>
 
                 </div>
@@ -917,9 +1085,9 @@ export default function App() {
     );
   }
 
-  // ------------------------------------------------------------
-  // LOGIN
-  // ------------------------------------------------------------
+  /* =========================================================
+     LOGIN
+  ========================================================= */
 
   if (stage === "login") {
     return (
@@ -940,12 +1108,14 @@ export default function App() {
             </h1>
 
             <p className="text-gray-500 mt-2">
-              Login using your SkillSphere account.
+              Login using your SkillSphere
+              account.
             </p>
 
             <div className="mt-6 space-y-4">
 
               <div>
+
                 <label className="block text-sm font-medium mb-1">
                   Email
                 </label>
@@ -953,17 +1123,20 @@ export default function App() {
                 <input
                   type="email"
                   value={email}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setEmail(
                       e.target.value
-                    )
-                  }
+                    );
+                    setLoginError("");
+                  }}
                   placeholder="Enter email"
                   className="w-full border border-gray-300 rounded-lg px-4 py-3 outline-none focus:border-[#1F5F95]"
                 />
+
               </div>
 
               <div>
+
                 <label className="block text-sm font-medium mb-1">
                   Password
                 </label>
@@ -971,25 +1144,37 @@ export default function App() {
                 <input
                   type="password"
                   value={password}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setPassword(
                       e.target.value
-                    )
-                  }
+                    );
+                    setLoginError("");
+                  }}
                   placeholder="Enter password"
+                  onKeyDown={(e) => {
+                    if (
+                      e.key ===
+                      "Enter"
+                    ) {
+                      handleLogin();
+                    }
+                  }}
                   className="w-full border border-gray-300 rounded-lg px-4 py-3 outline-none focus:border-[#1F5F95]"
                 />
+
               </div>
 
               {loginError && (
-                <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">
+                <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm break-words">
                   {loginError}
                 </div>
               )}
 
               <Button
                 disabled={loading}
-                onClick={handleLogin}
+                onClick={
+                  handleLogin
+                }
               >
                 {loading
                   ? "Logging in..."
@@ -1022,9 +1207,9 @@ export default function App() {
     );
   }
 
-  // ------------------------------------------------------------
-  // COURSES
-  // ------------------------------------------------------------
+  /* =========================================================
+     COURSES
+  ========================================================= */
 
   if (stage === "courses") {
     return (
@@ -1050,8 +1235,8 @@ export default function App() {
             </h1>
 
             <p className="text-gray-500 mt-1">
-              Choose a course to begin your
-              diagnostic assessment.
+              Choose a course to begin
+              your diagnostic assessment.
             </p>
 
           </div>
@@ -1067,42 +1252,41 @@ export default function App() {
           ) : (
             <div className="grid md:grid-cols-3 gap-5">
 
-              {courses.map(
-                (c) => (
+              {courses.map((c) => (
 
-                  <Card
-                    key={c.id}
-                    className="p-6 flex flex-col"
+                <Card
+                  key={c.id}
+                  className="p-6 flex flex-col"
+                >
+
+                  <span className="text-xs font-semibold text-green-700 bg-green-50 px-2 py-1 rounded w-fit">
+                    Skill Assessment
+                  </span>
+
+                  <h2 className="text-xl font-bold mt-4">
+                    {c.title}
+                  </h2>
+
+                  <p className="text-gray-500 text-sm mt-2 flex-1">
+                    {c.description}
+                  </p>
+
+                  <div className="text-sm text-gray-500 mt-5 mb-4">
+                    15 MCQs • Topic-wise
+                    analysis
+                  </div>
+
+                  <Button
+                    onClick={() =>
+                      startCourse(c)
+                    }
                   >
+                    Start Diagnostic Test
+                  </Button>
 
-                    <span className="text-xs font-semibold text-green-700 bg-green-50 px-2 py-1 rounded w-fit">
-                      Skill Assessment
-                    </span>
+                </Card>
 
-                    <h2 className="text-xl font-bold mt-4">
-                      {c.title}
-                    </h2>
-
-                    <p className="text-gray-500 text-sm mt-2 flex-1">
-                      {c.description}
-                    </p>
-
-                    <div className="text-sm text-gray-500 mt-5 mb-4">
-                      15 MCQs • Topic-wise analysis
-                    </div>
-
-                    <Button
-                      onClick={() =>
-                        startCourse(c)
-                      }
-                    >
-                      Start Diagnostic Test
-                    </Button>
-
-                  </Card>
-
-                )
-              )}
+              ))}
 
             </div>
           )}
@@ -1113,19 +1297,22 @@ export default function App() {
     );
   }
 
-  // ------------------------------------------------------------
-  // PRE TEST
-  // ------------------------------------------------------------
+  /* =========================================================
+     PRE TEST
+  ========================================================= */
 
   if (stage === "pretest") {
     return renderQuiz(false);
   }
 
-  // ------------------------------------------------------------
-  // RESULT
-  // ------------------------------------------------------------
+  /* =========================================================
+     RESULT
+  ========================================================= */
 
-  if (stage === "result" && course) {
+  if (
+    stage === "result" &&
+    course
+  ) {
     return (
       <div className="min-h-screen bg-[#F5F7FA]">
 
@@ -1142,6 +1329,7 @@ export default function App() {
             <div className="flex items-center justify-between">
 
               <div>
+
                 <p className="text-sm text-gray-500">
                   Diagnostic Result
                 </p>
@@ -1149,6 +1337,7 @@ export default function App() {
                 <h1 className="text-3xl font-bold">
                   Your Skill Gaps
                 </h1>
+
               </div>
 
               <div className="text-center">
@@ -1178,7 +1367,9 @@ export default function App() {
 
                     <div
                       className="border rounded-lg p-4"
-                      key={item.topic_id}
+                      key={
+                        item.topic_id
+                      }
                     >
 
                       <div className="flex justify-between">
@@ -1189,7 +1380,8 @@ export default function App() {
 
                         <span
                           className={
-                            item.percentage < 70
+                            item.percentage <
+                            70
                               ? "text-red-600"
                               : "text-green-600"
                           }
@@ -1202,13 +1394,22 @@ export default function App() {
                       <div className="h-2 bg-gray-200 rounded mt-3">
 
                         <div
-                          className={`h-2 rounded ${
-                            item.percentage < 70
-                              ? "bg-red-500"
-                              : "bg-green-500"
-                          }`}
+                          className={
+                            `h-2 rounded ${
+                              item.percentage <
+                              70
+                                ? "bg-red-500"
+                                : "bg-green-500"
+                            }`
+                          }
                           style={{
-                            width: `${item.percentage}%`,
+                            width: `${Math.min(
+                              100,
+                              Math.max(
+                                0,
+                                item.percentage
+                              )
+                            )}%`,
                           }}
                         />
 
@@ -1239,15 +1440,16 @@ export default function App() {
             </h2>
 
             <p className="text-gray-500 mt-1">
-              Select a weak topic to find a
-              suitable trainer.
+              Select a weak topic to
+              find a suitable trainer.
             </p>
 
-            {weakTopics.length === 0 ? (
+            {weakTopics.length ===
+            0 ? (
 
               <div className="mt-5 p-4 bg-green-50 text-green-700 rounded-lg">
-                Excellent! No major topic gap
-                was detected.
+                Excellent! No major
+                topic gap was detected.
               </div>
 
             ) : (
@@ -1258,28 +1460,36 @@ export default function App() {
                   (topic) => (
 
                     <div
-                      key={topic.topic_id}
+                      key={
+                        topic.topic_id
+                      }
                       className="border rounded-lg p-4 flex items-center justify-between"
                     >
 
                       <div>
 
                         <b>
-                          Topic ID:{" "}
-                          {topic.topic_id}
+                          {topic.topic ||
+                            `Topic ${topic.topic_id}`}
                         </b>
 
                         <p className="text-red-600 text-sm">
                           Score:{" "}
-                          {topic.percentage}%
+                          {
+                            topic.percentage
+                          }%
                         </p>
 
                       </div>
 
                       <Button
-                        disabled={loading}
+                        disabled={
+                          loading
+                        }
                         onClick={() =>
-                          findTrainer(topic)
+                          findTrainer(
+                            topic
+                          )
                         }
                       >
                         Find Trainer →
@@ -1302,9 +1512,9 @@ export default function App() {
     );
   }
 
-  // ------------------------------------------------------------
-  // BOOKING
-  // ------------------------------------------------------------
+  /* =========================================================
+     BOOKING
+  ========================================================= */
 
   if (
     stage === "booking" &&
@@ -1357,13 +1567,15 @@ export default function App() {
                 </p>
 
                 <p className="font-semibold">
-                  Topic ID:{" "}
-                  {currentWeakTopic.topic_id}
+                  {currentWeakTopic.topic ||
+                    `Topic ${currentWeakTopic.topic_id}`}
                 </p>
 
                 <p className="text-red-600">
                   Current Score:{" "}
-                  {currentWeakTopic.percentage}%
+                  {
+                    currentWeakTopic.percentage
+                  }%
                 </p>
 
               </div>
@@ -1402,7 +1614,8 @@ export default function App() {
                     >
 
                       <span className="font-medium">
-                        {slot.start_time} -{" "}
+                        {slot.start_time}{" "}
+                        -{" "}
                         {slot.end_time}
                       </span>
 
@@ -1451,11 +1664,14 @@ export default function App() {
     );
   }
 
-  // ------------------------------------------------------------
-  // LECTURE
-  // ------------------------------------------------------------
+  /* =========================================================
+     LECTURE
+  ========================================================= */
 
-  if (stage === "lecture" && course) {
+  if (
+    stage === "lecture" &&
+    course
+  ) {
     return (
       <div className="min-h-screen bg-[#F5F7FA]">
 
@@ -1492,7 +1708,8 @@ export default function App() {
               </p>
 
               <p>
-                {selectedSlot?.start_time} -{" "}
+                {selectedSlot?.start_time}{" "}
+                -{" "}
                 {selectedSlot?.end_time}
               </p>
 
@@ -1513,22 +1730,24 @@ export default function App() {
             <div className="mt-4 space-y-3 text-gray-700">
 
               <p>
-                ✓ Join the trainer session at
-                the booked time.
+                ✓ Join the trainer
+                session at the booked
+                time.
               </p>
 
               <p>
-                ✓ Ask questions about your
-                weak topic.
+                ✓ Ask questions about
+                your weak topic.
               </p>
 
               <p>
-                ✓ Complete the focused lecture.
+                ✓ Complete the focused
+                lecture.
               </p>
 
               <p>
-                ✓ Take the post-test to measure
-                improvement.
+                ✓ Take the post-test
+                to measure improvement.
               </p>
 
             </div>
@@ -1562,19 +1781,22 @@ export default function App() {
     );
   }
 
-  // ------------------------------------------------------------
-  // POST TEST
-  // ------------------------------------------------------------
+  /* =========================================================
+     POST TEST
+  ========================================================= */
 
   if (stage === "posttest") {
     return renderQuiz(true);
   }
 
-  // ------------------------------------------------------------
-  // FINAL RESULT
-  // ------------------------------------------------------------
+  /* =========================================================
+     FINAL RESULT
+  ========================================================= */
 
-  if (stage === "final" && course) {
+  if (
+    stage === "final" &&
+    course
+  ) {
     const improvement =
       postScore - preScore;
 
@@ -1602,8 +1824,9 @@ export default function App() {
               </h1>
 
               <p className="text-gray-500 mt-2">
-                You completed the lecture and
-                post-test for{" "}
+                You completed the
+                lecture and post-test
+                for{" "}
                 {course.title}.
               </p>
 
@@ -1643,12 +1866,14 @@ export default function App() {
 
                 <b
                   className={`text-3xl ${
-                    improvement >= 0
+                    improvement >=
+                    0
                       ? "text-green-700"
                       : "text-red-600"
                   }`}
                 >
-                  {improvement >= 0
+                  {improvement >=
+                  0
                     ? "+"
                     : ""}
                   {improvement}%
@@ -1726,9 +1951,9 @@ export default function App() {
     );
   }
 
-  // ------------------------------------------------------------
-  // TRAINER DASHBOARD
-  // ------------------------------------------------------------
+  /* =========================================================
+     TRAINER
+  ========================================================= */
 
   if (stage === "trainer") {
     return (
@@ -1757,9 +1982,10 @@ export default function App() {
             </h2>
 
             <p className="text-gray-600 mt-3">
-              Your trainer account is active.
-              Trainer expertise and available
-              lecture slots are managed through
+              Your trainer account is
+              active. Trainer expertise
+              and available lecture
+              slots are managed through
               the SkillSphere backend.
             </p>
 
@@ -1775,10 +2001,10 @@ export default function App() {
                 {user?.email}
               </p>
 
-                <p>
-                  <b>Role:</b>{" "}
-                  {user?.role}
-                </p>
+              <p>
+                <b>Role:</b>{" "}
+                {user?.role}
+              </p>
 
             </div>
 
@@ -1790,9 +2016,9 @@ export default function App() {
     );
   }
 
-  // ------------------------------------------------------------
-  // ADMIN
-  // ------------------------------------------------------------
+  /* =========================================================
+     ADMIN
+  ========================================================= */
 
   if (stage === "admin") {
     return (
