@@ -5,746 +5,494 @@ from .models import (
     Topic,
     Question,
     TrainerTopic,
-    TrainerSlot,
+    TrainerSlot
 )
 
 
 def seed():
-    # Create tables if they don't exist
+
     Base.metadata.create_all(bind=engine)
 
     db = SessionLocal()
 
     try:
-        # =========================================================
-        # 1. USERS
-        # =========================================================
 
-        users_data = [
-            {
-                "name": "Demo Trainee",
-                "email": "trainee@skillsphere.com",
-                "password": "123456",
-                "role": "trainee",
-                "bio": "",
-            },
-            {
-                "name": "Aarav Sharma",
-                "email": "aarav@skillsphere.com",
-                "password": "123456",
-                "role": "trainer",
-                "bio": "Python and programming mentor.",
-            },
-            {
-                "name": "Neha Verma",
-                "email": "neha@skillsphere.com",
-                "password": "123456",
-                "role": "trainer",
-                "bio": "SQL and database mentor.",
-            },
-            {
-                "name": "Rohan Singh",
-                "email": "rohan@skillsphere.com",
-                "password": "123456",
-                "role": "trainer",
-                "bio": "Cloud and AWS fundamentals mentor.",
-            },
-            {
-                "name": "Admin",
-                "email": "admin@skillsphere.com",
-                "password": "123456",
-                "role": "admin",
-                "bio": "",
-            },
+        # -------------------------------------------------
+        # REMOVE OLD DEMO ACCOUNTS
+        # -------------------------------------------------
+
+        demo_emails = [
+            "trainee@skillsphere.com",
+            "aarav@skillsphere.com",
+            "neha@skillsphere.com",
+            "rohan@skillsphere.com",
+            "admin@skillsphere.com"
         ]
 
-        created_users = {}
-
-        for data in users_data:
-            user = (
-                db.query(User)
-                .filter(User.email == data["email"])
-                .first()
-            )
-
-            if user:
-                # Existing user -> update credentials/details
-                user.name = data["name"]
-                user.password = data["password"]
-                user.role = data["role"]
-                user.bio = data["bio"]
-            else:
-                # New user
-                user = User(
-                    name=data["name"],
-                    email=data["email"],
-                    password=data["password"],
-                    role=data["role"],
-                    bio=data["bio"],
-                )
-                db.add(user)
-
-            db.flush()
-            created_users[data["email"]] = user
+        db.query(User).filter(
+            User.email.in_(demo_emails)
+        ).delete(
+            synchronize_session=False
+        )
 
         db.commit()
 
-        trainee = created_users["trainee@skillsphere.com"]
-        trainer1 = created_users["aarav@skillsphere.com"]
-        trainer2 = created_users["neha@skillsphere.com"]
-        trainer3 = created_users["rohan@skillsphere.com"]
+        # -------------------------------------------------
+        # COURSES
+        # -------------------------------------------------
 
-        # =========================================================
-        # 2. COURSES
-        # =========================================================
+        if db.query(Course).count() == 0:
 
-        course_data = [
-            (
-                "Python Fundamentals",
-                "Core Python concepts for beginners",
-            ),
-            (
-                "SQL Fundamentals",
-                "Queries, joins and database basics",
-            ),
-            (
-                "Cloud Computing Basics",
-                "Cloud and AWS fundamentals",
-            ),
-        ]
-
-        courses = []
-
-        for title, description in course_data:
-            course = (
-                db.query(Course)
-                .filter(Course.title == title)
-                .first()
+            python = Course(
+                title="Python Fundamentals",
+                description="Core Python programming concepts"
             )
 
-            if not course:
-                course = Course(
-                    title=title,
-                    description=description,
+            sql = Course(
+                title="SQL Fundamentals",
+                description="Queries, joins and database basics"
+            )
+
+            cloud = Course(
+                title="Cloud Computing Basics",
+                description="Cloud computing and AWS fundamentals"
+            )
+
+            db.add_all([
+                python,
+                sql,
+                cloud
+            ])
+
+            db.commit()
+
+            # ---------------------------------------------
+            # TOPICS
+            # ---------------------------------------------
+
+            topic_data = [
+                (
+                    python,
+                    [
+                        "Variables & Data Types",
+                        "Control Flow",
+                        "Functions"
+                    ]
+                ),
+                (
+                    sql,
+                    [
+                        "SELECT & Filtering",
+                        "Joins",
+                        "Aggregation"
+                    ]
+                ),
+                (
+                    cloud,
+                    [
+                        "Cloud Basics",
+                        "AWS Services",
+                        "Security Basics"
+                    ]
                 )
-                db.add(course)
-                db.flush()
+            ]
 
-            courses.append(course)
+            topic_map = {}
 
-        db.commit()
+            for course, names in topic_data:
 
-        # =========================================================
-        # 3. TOPICS
-        # =========================================================
+                for name in names:
 
-        topic_names = {
-            courses[0].id: [
-                "Variables & Data Types",
-                "Control Flow",
-                "Functions",
-            ],
-            courses[1].id: [
-                "SELECT & Filtering",
-                "Joins",
-                "Aggregation",
-            ],
-            courses[2].id: [
-                "Cloud Basics",
-                "AWS Services",
-                "Security Basics",
-            ],
-        }
-
-        topic_map = {}
-
-        for course_id, names in topic_names.items():
-            for name in names:
-                topic = (
-                    db.query(Topic)
-                    .filter(
-                        Topic.course_id == course_id,
-                        Topic.name == name,
-                    )
-                    .first()
-                )
-
-                if not topic:
                     topic = Topic(
-                        course_id=course_id,
-                        name=name,
+                        course_id=course.id,
+                        name=name
                     )
+
                     db.add(topic)
                     db.flush()
 
-                topic_map[name] = topic.id
+                    topic_map[name] = topic.id
 
-        db.commit()
+            # ---------------------------------------------
+            # QUESTIONS
+            # ---------------------------------------------
 
-        # =========================================================
-        # 4. QUESTIONS
-        # =========================================================
+            questions = [
 
-        qsets = [
+                # PYTHON
+                (
+                    python,
+                    "Variables & Data Types",
+                    "Which is immutable?",
+                    "List",
+                    "Dictionary",
+                    "Tuple",
+                    "Set",
+                    "C"
+                ),
+                (
+                    python,
+                    "Variables & Data Types",
+                    "What is the type of 10?",
+                    "str",
+                    "int",
+                    "float",
+                    "bool",
+                    "B"
+                ),
+                (
+                    python,
+                    "Variables & Data Types",
+                    "Which stores key-value pairs?",
+                    "List",
+                    "Tuple",
+                    "Dictionary",
+                    "Set",
+                    "C"
+                ),
+                (
+                    python,
+                    "Control Flow",
+                    "Which keyword starts a condition?",
+                    "for",
+                    "if",
+                    "def",
+                    "try",
+                    "B"
+                ),
+                (
+                    python,
+                    "Control Flow",
+                    "Which repeats over items?",
+                    "if",
+                    "for",
+                    "class",
+                    "import",
+                    "B"
+                ),
+                (
+                    python,
+                    "Control Flow",
+                    "What does break do?",
+                    "Skips one item",
+                    "Ends loop",
+                    "Starts loop",
+                    "Defines function",
+                    "B"
+                ),
+                (
+                    python,
+                    "Functions",
+                    "Which keyword defines a function?",
+                    "func",
+                    "function",
+                    "def",
+                    "lambda",
+                    "C"
+                ),
+                (
+                    python,
+                    "Functions",
+                    "How do you return a value?",
+                    "give",
+                    "return",
+                    "send",
+                    "output",
+                    "B"
+                ),
+                (
+                    python,
+                    "Functions",
+                    "Arguments are passed inside?",
+                    "[]",
+                    "{}",
+                    "()",
+                    "<>",
+                    "C"
+                ),
+
+                # SQL
+                (
+                    sql,
+                    "SELECT & Filtering",
+                    "Which retrieves rows?",
+                    "SELECT",
+                    "GET",
+                    "FETCH",
+                    "READ",
+                    "A"
+                ),
+                (
+                    sql,
+                    "SELECT & Filtering",
+                    "Which filters rows?",
+                    "WHERE",
+                    "WHEN",
+                    "FILTER",
+                    "HAVING",
+                    "A"
+                ),
+                (
+                    sql,
+                    "Joins",
+                    "Which join matches rows in both tables?",
+                    "INNER JOIN",
+                    "LEFT JOIN",
+                    "CROSS JOIN",
+                    "SELF JOIN",
+                    "A"
+                ),
+                (
+                    sql,
+                    "Joins",
+                    "Which keeps all rows from the left table?",
+                    "RIGHT JOIN",
+                    "LEFT JOIN",
+                    "INNER JOIN",
+                    "CROSS JOIN",
+                    "B"
+                ),
+                (
+                    sql,
+                    "Aggregation",
+                    "Which function counts rows?",
+                    "SUM",
+                    "COUNT",
+                    "TOTAL",
+                    "ROWS",
+                    "B"
+                ),
+                (
+                    sql,
+                    "Aggregation",
+                    "Which function calculates average?",
+                    "AVG",
+                    "MEAN",
+                    "AVERAGE",
+                    "MID",
+                    "A"
+                ),
+
+                # CLOUD
+                (
+                    cloud,
+                    "Cloud Basics",
+                    "IaaS provides?",
+                    "Infrastructure",
+                    "Software",
+                    "Data",
+                    "Email",
+                    "A"
+                ),
+                (
+                    cloud,
+                    "Cloud Basics",
+                    "Cloud scalability means?",
+                    "Adjust capacity",
+                    "Delete data",
+                    "Encrypt password",
+                    "Write code",
+                    "A"
+                ),
+                (
+                    cloud,
+                    "AWS Services",
+                    "EC2 is mainly used for?",
+                    "Virtual servers",
+                    "Object storage",
+                    "DNS",
+                    "Database",
+                    "A"
+                ),
+                (
+                    cloud,
+                    "AWS Services",
+                    "S3 is?",
+                    "Object storage",
+                    "Compute",
+                    "Queue",
+                    "Firewall",
+                    "A"
+                ),
+                (
+                    cloud,
+                    "AWS Services",
+                    "RDS provides?",
+                    "Managed databases",
+                    "DNS",
+                    "Files",
+                    "Containers",
+                    "A"
+                ),
+                (
+                    cloud,
+                    "Security Basics",
+                    "IAM controls?",
+                    "Identity and access",
+                    "Images",
+                    "Servers",
+                    "DNS",
+                    "A"
+                ),
+                (
+                    cloud,
+                    "Security Basics",
+                    "Least privilege means?",
+                    "Minimum required access",
+                    "Admin for everyone",
+                    "No passwords",
+                    "Public access",
+                    "A"
+                ),
+                (
+                    cloud,
+                    "Security Basics",
+                    "MFA adds?",
+                    "Extra authentication factor",
+                    "More storage",
+                    "Faster CPU",
+                    "Backup",
+                    "A"
+                )
+            ]
+
+            for (
+                course,
+                topic_name,
+                text,
+                a,
+                b,
+                c,
+                d,
+                correct
+            ) in questions:
+
+                db.add(
+                    Question(
+                        course_id=course.id,
+                        topic_id=topic_map[topic_name],
+                        text=text,
+                        option_a=a,
+                        option_b=b,
+                        option_c=c,
+                        option_d=d,
+                        correct_answer=correct
+                    )
+                )
+
+            db.commit()
+
+        else:
+
+            topic_map = {
+                t.name: t.id
+                for t in db.query(Topic).all()
+            }
+
+        # -------------------------------------------------
+        # TRAINER ACCOUNTS
+        # -------------------------------------------------
+
+        trainer_data = [
             (
-                courses[0],
-                [
-                    (
-                        "Variables & Data Types",
-                        [
-                            (
-                                "Which is immutable?",
-                                "List",
-                                "Dictionary",
-                                "Tuple",
-                                "Set",
-                                "C",
-                            ),
-                            (
-                                "What is the type of 10?",
-                                "str",
-                                "int",
-                                "float",
-                                "bool",
-                                "B",
-                            ),
-                            (
-                                "Which stores key-value pairs?",
-                                "List",
-                                "Tuple",
-                                "Dictionary",
-                                "Set",
-                                "C",
-                            ),
-                            (
-                                "What does len('hello') return?",
-                                "4",
-                                "5",
-                                "6",
-                                "0",
-                                "B",
-                            ),
-                            (
-                                "Which converts text to integer?",
-                                "str()",
-                                "float()",
-                                "int()",
-                                "list()",
-                                "C",
-                            ),
-                        ],
-                    ),
-                    (
-                        "Control Flow",
-                        [
-                            (
-                                "Which keyword starts a condition?",
-                                "for",
-                                "if",
-                                "def",
-                                "try",
-                                "B",
-                            ),
-                            (
-                                "Which repeats over items?",
-                                "if",
-                                "for",
-                                "class",
-                                "import",
-                                "B",
-                            ),
-                            (
-                                "What does break do?",
-                                "Skips one item",
-                                "Ends loop",
-                                "Starts loop",
-                                "Defines function",
-                                "B",
-                            ),
-                            (
-                                "Which is a comparison operator?",
-                                "=",
-                                "==",
-                                "+",
-                                "//",
-                                "B",
-                            ),
-                            (
-                                "What is elif used for?",
-                                "Another condition",
-                                "Loop",
-                                "Function",
-                                "Import",
-                                "A",
-                            ),
-                        ],
-                    ),
-                    (
-                        "Functions",
-                        [
-                            (
-                                "Which keyword defines a function?",
-                                "func",
-                                "function",
-                                "def",
-                                "lambda",
-                                "C",
-                            ),
-                            (
-                                "How do you return a value?",
-                                "give",
-                                "return",
-                                "send",
-                                "output",
-                                "B",
-                            ),
-                            (
-                                "Arguments are passed inside?",
-                                "[]",
-                                "{}",
-                                "()",
-                                "<>",
-                                "C",
-                            ),
-                            (
-                                "A function can return?",
-                                "Only numbers",
-                                "Only text",
-                                "Multiple values",
-                                "Nothing ever",
-                                "C",
-                            ),
-                            (
-                                "Anonymous function is commonly called?",
-                                "lambda",
-                                "inline",
-                                "anon",
-                                "quick",
-                                "A",
-                            ),
-                        ],
-                    ),
-                ],
-            ),
-            (
-                courses[1],
-                [
-                    (
-                        "SELECT & Filtering",
-                        [
-                            (
-                                "Which retrieves rows?",
-                                "SELECT",
-                                "GET",
-                                "FETCHROW",
-                                "READ",
-                                "A",
-                            ),
-                            (
-                                "Which filters rows?",
-                                "WHERE",
-                                "WHEN",
-                                "FILTER",
-                                "HAVINGONLY",
-                                "A",
-                            ),
-                            (
-                                "Sort results with?",
-                                "ORDER BY",
-                                "SORT",
-                                "GROUP",
-                                "ARRANGE",
-                                "A",
-                            ),
-                            (
-                                "Remove duplicate rows with?",
-                                "UNIQUE",
-                                "DISTINCT",
-                                "ONLY",
-                                "DEDUP",
-                                "B",
-                            ),
-                            (
-                                "Wildcard for any characters?",
-                                "_",
-                                "%",
-                                "*",
-                                "?",
-                                "B",
-                            ),
-                        ],
-                    ),
-                    (
-                        "Joins",
-                        [
-                            (
-                                "Matches rows in both tables?",
-                                "INNER JOIN",
-                                "LEFT JOIN",
-                                "CROSS JOIN",
-                                "SELF JOIN",
-                                "A",
-                            ),
-                            (
-                                "Keeps all left rows?",
-                                "RIGHT JOIN",
-                                "LEFT JOIN",
-                                "INNER JOIN",
-                                "CROSS JOIN",
-                                "B",
-                            ),
-                            (
-                                "Cartesian product is?",
-                                "INNER",
-                                "LEFT",
-                                "CROSS",
-                                "RIGHT",
-                                "C",
-                            ),
-                            (
-                                "Join condition commonly uses?",
-                                "ON",
-                                "AT",
-                                "WITH",
-                                "BY",
-                                "A",
-                            ),
-                            (
-                                "A table can be joined to itself using?",
-                                "SELF JOIN",
-                                "DOUBLE JOIN",
-                                "LOOP JOIN",
-                                "REPEAT",
-                                "A",
-                            ),
-                        ],
-                    ),
-                    (
-                        "Aggregation",
-                        [
-                            (
-                                "Counts rows with?",
-                                "SUM",
-                                "COUNT",
-                                "TOTAL",
-                                "ROWS",
-                                "B",
-                            ),
-                            (
-                                "Average uses?",
-                                "AVG",
-                                "MEAN",
-                                "AVERAGE",
-                                "MID",
-                                "A",
-                            ),
-                            (
-                                "Groups rows with?",
-                                "GROUP BY",
-                                "ORDER BY",
-                                "COLLECT",
-                                "PACK",
-                                "A",
-                            ),
-                            (
-                                "Filters groups with?",
-                                "WHERE",
-                                "HAVING",
-                                "GROUPFILTER",
-                                "AFTER",
-                                "B",
-                            ),
-                            (
-                                "Largest value with?",
-                                "MAX",
-                                "TOP",
-                                "HIGH",
-                                "LARGE",
-                                "A",
-                            ),
-                        ],
-                    ),
-                ],
-            ),
-            (
-                courses[2],
-                [
-                    (
-                        "Cloud Basics",
-                        [
-                            (
-                                "Cloud provides computing over?",
-                                "Internet",
-                                "USB",
-                                "Printer",
-                                "Bluetooth",
-                                "A",
-                            ),
-                            (
-                                "Pay-as-you-go means?",
-                                "Fixed yearly only",
-                                "Pay for usage",
-                                "Free forever",
-                                "One-time payment",
-                                "B",
-                            ),
-                            (
-                                "IaaS provides?",
-                                "Infrastructure",
-                                "Only software",
-                                "Only data",
-                                "Emails",
-                                "A",
-                            ),
-                            (
-                                "Scalability means?",
-                                "Adjust capacity",
-                                "Delete data",
-                                "Encrypt password",
-                                "Write code",
-                                "A",
-                            ),
-                            (
-                                "Public cloud is?",
-                                "Shared provider infrastructure",
-                                "Your laptop",
-                                "Offline server",
-                                "USB drive",
-                                "A",
-                            ),
-                        ],
-                    ),
-                    (
-                        "AWS Services",
-                        [
-                            (
-                                "EC2 is for?",
-                                "Virtual servers",
-                                "Object storage",
-                                "DNS only",
-                                "Database only",
-                                "A",
-                            ),
-                            (
-                                "S3 is?",
-                                "Object storage",
-                                "Compute",
-                                "Queue",
-                                "Firewall",
-                                "A",
-                            ),
-                            (
-                                "RDS provides?",
-                                "Managed databases",
-                                "DNS",
-                                "Files only",
-                                "Containers only",
-                                "A",
-                            ),
-                            (
-                                "Lambda is?",
-                                "Serverless compute",
-                                "Storage",
-                                "Networking",
-                                "Monitoring",
-                                "A",
-                            ),
-                            (
-                                "CloudFront is?",
-                                "CDN",
-                                "Database",
-                                "VM",
-                                "IAM user",
-                                "A",
-                            ),
-                        ],
-                    ),
-                    (
-                        "Security Basics",
-                        [
-                            (
-                                "IAM controls?",
-                                "Identity and access",
-                                "Images",
-                                "Servers only",
-                                "DNS",
-                                "A",
-                            ),
-                            (
-                                "Least privilege means?",
-                                "Minimum required access",
-                                "Admin for all",
-                                "No passwords",
-                                "Public access",
-                                "A",
-                            ),
-                            (
-                                "MFA adds?",
-                                "Extra authentication factor",
-                                "More storage",
-                                "Faster CPU",
-                                "Backup",
-                                "A",
-                            ),
-                            (
-                                "Encryption protects?",
-                                "Data",
-                                "Only CPU",
-                                "Network speed",
-                                "Billing",
-                                "A",
-                            ),
-                            (
-                                "Security groups act as?",
-                                "Virtual firewall",
-                                "Database",
-                                "Storage",
-                                "DNS",
-                                "A",
-                            ),
-                        ],
-                    ),
-                ],
-            ),
-        ]
-
-        # Only add questions if the course doesn't already have them.
-        # This prevents duplicate questions every Render restart.
-        for course, topics in qsets:
-            existing_count = (
-                db.query(Question)
-                .filter(Question.course_id == course.id)
-                .count()
-            )
-
-            if existing_count == 0:
-                for topic_name, questions in topics:
-                    topic_id = topic_map[topic_name]
-
-                    for (
-                        text,
-                        option_a,
-                        option_b,
-                        option_c,
-                        option_d,
-                        correct_answer,
-                    ) in questions:
-                        db.add(
-                            Question(
-                                course_id=course.id,
-                                topic_id=topic_id,
-                                text=text,
-                                option_a=option_a,
-                                option_b=option_b,
-                                option_c=option_c,
-                                option_d=option_d,
-                                correct_answer=correct_answer,
-                            )
-                        )
-
-        db.commit()
-
-        # =========================================================
-        # 5. TRAINER EXPERTISE
-        # =========================================================
-
-        trainer_topics = [
-            (
-                trainer1,
+                "Python Trainer",
+                "python.trainer@skillsphere.com",
+                "Python programming and OOP mentor.",
                 [
                     "Variables & Data Types",
                     "Control Flow",
-                    "Functions",
-                ],
+                    "Functions"
+                ]
             ),
             (
-                trainer2,
+                "SQL Trainer",
+                "sql.trainer@skillsphere.com",
+                "SQL and database mentor.",
                 [
                     "SELECT & Filtering",
                     "Joins",
-                    "Aggregation",
-                ],
+                    "Aggregation"
+                ]
             ),
             (
-                trainer3,
+                "Cloud Trainer",
+                "cloud.trainer@skillsphere.com",
+                "Cloud and AWS mentor.",
                 [
                     "Cloud Basics",
                     "AWS Services",
-                    "Security Basics",
-                ],
-            ),
+                    "Security Basics"
+                ]
+            )
         ]
 
-        for trainer, topic_list in trainer_topics:
-            for topic_name in topic_list:
-                topic_id = topic_map[topic_name]
+        for (
+            name,
+            email,
+            bio,
+            expertise
+        ) in trainer_data:
 
-                exists = (
-                    db.query(TrainerTopic)
-                    .filter(
-                        TrainerTopic.trainer_id == trainer.id,
-                        TrainerTopic.topic_id == topic_id,
-                    )
-                    .first()
+            trainer = db.query(User).filter(
+                User.email == email
+            ).first()
+
+            if not trainer:
+
+                trainer = User(
+                    name=name,
+                    email=email,
+                    password="trainer123",
+                    role="trainer",
+                    bio=bio
                 )
 
+                db.add(trainer)
+                db.commit()
+                db.refresh(trainer)
+
+            for topic_name in expertise:
+
+                topic_id = topic_map.get(topic_name)
+
+                if not topic_id:
+                    continue
+
+                exists = db.query(TrainerTopic).filter(
+                    TrainerTopic.trainer_id == trainer.id,
+                    TrainerTopic.topic_id == topic_id
+                ).first()
+
                 if not exists:
+
                     db.add(
                         TrainerTopic(
                             trainer_id=trainer.id,
-                            topic_id=topic_id,
+                            topic_id=topic_id
                         )
                     )
 
-        db.commit()
+            # Default trainer slots
+            if db.query(TrainerSlot).filter(
+                TrainerSlot.trainer_id == trainer.id
+            ).count() == 0:
 
-        # =========================================================
-        # 6. TRAINER SLOTS
-        # =========================================================
+                for start, end in [
+                    ("10:00", "11:00"),
+                    ("14:00", "15:00"),
+                    ("17:00", "18:00")
+                ]:
 
-        slot_times = [
-            ("10:00", "11:00"),
-            ("14:00", "15:00"),
-            ("17:00", "18:00"),
-        ]
-
-        for trainer in [trainer1, trainer2, trainer3]:
-            for start_time, end_time in slot_times:
-                exists = (
-                    db.query(TrainerSlot)
-                    .filter(
-                        TrainerSlot.trainer_id == trainer.id,
-                        TrainerSlot.start_time == start_time,
-                        TrainerSlot.end_time == end_time,
-                    )
-                    .first()
-                )
-
-                if not exists:
                     db.add(
                         TrainerSlot(
                             trainer_id=trainer.id,
-                            start_time=start_time,
-                            end_time=end_time,
-                            available=True,
+                            start_time=start,
+                            end_time=end,
+                            available=True
                         )
                     )
 
         db.commit()
-
-        print("==========================================")
-        print("SkillSphere seed completed successfully")
-        print("Demo Trainee: trainee@skillsphere.com / 123456")
-        print("Aarav:        aarav@skillsphere.com / 123456")
-        print("Neha:         neha@skillsphere.com / 123456")
-        print("Rohan:        rohan@skillsphere.com / 123456")
-        print("Admin:        admin@skillsphere.com / 123456")
-        print("==========================================")
-
-    except Exception as e:
-        db.rollback()
-        print("SEED ERROR:", e)
-        raise
 
     finally:
         db.close()
