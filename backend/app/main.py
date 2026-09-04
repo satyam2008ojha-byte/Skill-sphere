@@ -1,9 +1,10 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from .database import SessionLocal, engine, Base
+from .database import engine, Base, get_db
 from .models import (
     User,
     Course,
@@ -17,6 +18,7 @@ from .models import (
     Lecture,
     TopicResult,
 )
+
 from .schemas import (
     LoginRequest,
     RegisterRequest,
@@ -27,14 +29,22 @@ from .schemas import (
     PasswordUpdate,
 )
 
-# ============================================================
+from .seed import seed_database
+
+
+# =========================================================
 # APP
-# ============================================================
+# =========================================================
 
 app = FastAPI(
     title="SkillSphere API",
     version="2.0"
 )
+
+
+# =========================================================
+# CORS
+# =========================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -48,71 +58,87 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# =========================================================
+# DATABASE
+# =========================================================
+
 Base.metadata.create_all(bind=engine)
 
 
-# ============================================================
-# DATABASE
-# ============================================================
+# =========================================================
+# SEED DATABASE
+# =========================================================
 
-def get_db():
-    db = SessionLocal()
+# This automatically creates:
+# Python
+# Cyber Security
+# Database
+# 15 MCQs for each course
+# Demo Trainers
+# Trainer Topics
+# Trainer Slots
 
-    try:
-        yield db
-    finally:
-        db.close()
+try:
+    seed_database()
+    print("SkillSphere seed completed.")
+except Exception as e:
+    print("Seed error:", e)
 
 
-# ============================================================
-# BASIC
-# ============================================================
+# =========================================================
+# HEALTH CHECK
+# =========================================================
 
 @app.get("/")
-def home():
+def root():
     return {
         "message": "SkillSphere API is running",
+        "status": "ok",
         "version": "2.0"
     }
 
 
-# ============================================================
+# =========================================================
 # AUTH - REGISTER
-# ============================================================
+# =========================================================
 
 @app.post("/auth/register")
-def register(data: RegisterRequest, db: Session = Depends(get_db)):
+def register(
+    data: RegisterRequest,
+    db: Session = Depends(get_db)
+):
 
-    role = data.role.lower().strip()
+    existing_user = (
+        db.query(User)
+        .filter(User.email == data.email)
+        .first()
+    )
 
-    if role not in ["trainee", "trainer", "admin"]:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid role"
-        )
-
-    existing = db.query(User).filter(
-        User.email == data.email
-    ).first()
-
-    if existing:
+    if existing_user:
         raise HTTPException(
             status_code=400,
             detail="Email already registered"
         )
 
-    if len(data.password) < 6:
+    allowed_roles = [
+        "trainee",
+        "trainer",
+        "admin"
+    ]
+
+    if data.role not in allowed_roles:
         raise HTTPException(
             status_code=400,
-            detail="Password must contain at least 6 characters"
+            detail="Invalid role"
         )
 
     user = User(
-        name=data.name.strip(),
-        email=data.email.lower().strip(),
+        name=data.name,
+        email=data.email,
         password=data.password,
-        role=role,
-        bio=data.bio or "",
+        role=data.role,
+        bio=data.bio or ""
     )
 
     db.add(user)
@@ -126,21 +152,26 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
             "name": user.name,
             "email": user.email,
             "role": user.role,
-            "bio": user.bio,
+            "bio": user.bio or ""
         }
     }
 
 
-# ============================================================
+# =========================================================
 # AUTH - LOGIN
-# ============================================================
+# =========================================================
 
 @app.post("/auth/login")
-def login(data: LoginRequest, db: Session = Depends(get_db)):
+def login(
+    data: LoginRequest,
+    db: Session = Depends(get_db)
+):
 
-    user = db.query(User).filter(
-        User.email == data.email.lower().strip()
-    ).first()
+    user = (
+        db.query(User)
+        .filter(User.email == data.email)
+        .first()
+    )
 
     if not user:
         raise HTTPException(
@@ -161,14 +192,14 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
             "name": user.name,
             "email": user.email,
             "role": user.role,
-            "bio": user.bio or "",
+            "bio": user.bio or ""
         }
     }
 
 
-# ============================================================
-# USER PROFILE
-# ============================================================
+# =========================================================
+# USER
+# =========================================================
 
 @app.get("/users/{user_id}")
 def get_user(
@@ -191,9 +222,13 @@ def get_user(
         "name": user.name,
         "email": user.email,
         "role": user.role,
-        "bio": user.bio or "",
+        "bio": user.bio or ""
     }
 
+
+# =========================================================
+# UPDATE PROFILE
+# =========================================================
 
 @app.put("/users/{user_id}/profile")
 def update_profile(
@@ -212,30 +247,30 @@ def update_profile(
             detail="User not found"
         )
 
-    user.name = data.name.strip()
+    user.name = data.name
     user.bio = data.bio or ""
 
     db.commit()
     db.refresh(user)
 
     return {
-        "message": "Profile updated",
+        "message": "Profile updated successfully",
         "user": {
             "id": user.id,
             "name": user.name,
             "email": user.email,
             "role": user.role,
-            "bio": user.bio or "",
+            "bio": user.bio or ""
         }
     }
 
 
-# ============================================================
-# PASSWORD CHANGE
-# ============================================================
+# =========================================================
+# CHANGE PASSWORD
+# =========================================================
 
 @app.put("/users/{user_id}/password")
-def change_password(
+def update_password(
     user_id: int,
     data: PasswordUpdate,
     db: Session = Depends(get_db)
@@ -257,10 +292,10 @@ def change_password(
             detail="Current password is incorrect"
         )
 
-    if len(data.new_password) < 6:
+    if len(data.new_password) < 4:
         raise HTTPException(
             status_code=400,
-            detail="New password must contain at least 6 characters"
+            detail="New password must contain at least 4 characters"
         )
 
     user.password = data.new_password
@@ -268,47 +303,59 @@ def change_password(
     db.commit()
 
     return {
-        "message": "Password changed successfully"
+        "message": "Password updated successfully"
     }
 
 
-# ============================================================
+# =========================================================
 # COURSES
-# ============================================================
+# =========================================================
 
 @app.get("/courses")
 def get_courses(
     db: Session = Depends(get_db)
 ):
 
-    courses = db.query(Course).all()
+    courses = (
+        db.query(Course)
+        .order_by(Course.id)
+        .all()
+    )
 
     result = []
 
     for course in courses:
 
-        topic_count = db.query(Topic).filter(
-            Topic.course_id == course.id
-        ).count()
+        topic_count = (
+            db.query(func.count(Topic.id))
+            .filter(
+                Topic.course_id == course.id
+            )
+            .scalar()
+        )
 
-        question_count = db.query(Question).filter(
-            Question.course_id == course.id
-        ).count()
+        question_count = (
+            db.query(func.count(Question.id))
+            .filter(
+                Question.course_id == course.id
+            )
+            .scalar()
+        )
 
         result.append({
             "id": course.id,
             "title": course.title,
             "description": course.description or "",
-            "topic_count": topic_count,
-            "question_count": question_count,
+            "topic_count": topic_count or 0,
+            "question_count": question_count or 0
         })
 
     return result
 
 
-# ============================================================
+# =========================================================
 # COURSE TOPICS
-# ============================================================
+# =========================================================
 
 @app.get("/courses/{course_id}/topics")
 def get_course_topics(
@@ -316,54 +363,84 @@ def get_course_topics(
     db: Session = Depends(get_db)
 ):
 
-    topics = db.query(Topic).filter(
-        Topic.course_id == course_id
-    ).all()
+    course = db.query(Course).filter(
+        Course.id == course_id
+    ).first()
+
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail="Course not found"
+        )
+
+    topics = (
+        db.query(Topic)
+        .filter(
+            Topic.course_id == course_id
+        )
+        .order_by(Topic.id)
+        .all()
+    )
 
     return [
         {
             "id": topic.id,
             "name": topic.name,
-            "course_id": topic.course_id,
+            "course_id": topic.course_id
         }
         for topic in topics
     ]
 
 
-# ============================================================
+# =========================================================
 # COURSE QUESTIONS
-# ============================================================
+# =========================================================
 
 @app.get("/courses/{course_id}/questions")
-def get_questions(
+def get_course_questions(
     course_id: int,
     db: Session = Depends(get_db)
 ):
 
-    questions = db.query(Question).filter(
-        Question.course_id == course_id
-    ).all()
+    course = db.query(Course).filter(
+        Course.id == course_id
+    ).first()
+
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail="Course not found"
+        )
+
+    questions = (
+        db.query(Question)
+        .filter(
+            Question.course_id == course_id
+        )
+        .order_by(Question.id)
+        .all()
+    )
 
     return [
         {
-            "id": q.id,
-            "course_id": q.course_id,
-            "topic_id": q.topic_id,
-            "text": q.text,
+            "id": question.id,
+            "course_id": question.course_id,
+            "topic_id": question.topic_id,
+            "text": question.text,
             "options": [
-                q.option_a,
-                q.option_b,
-                q.option_c,
-                q.option_d,
-            ],
+                question.option_a,
+                question.option_b,
+                question.option_c,
+                question.option_d
+            ]
         }
-        for q in questions
+        for question in questions
     ]
 
 
-# ============================================================
-# TEST SUBMISSION
-# ============================================================
+# =========================================================
+# SUBMIT TEST
+# =========================================================
 
 @app.post("/tests/submit")
 def submit_test(
@@ -381,107 +458,126 @@ def submit_test(
             detail="Trainee not found"
         )
 
-    questions = db.query(Question).filter(
-        Question.course_id == data.course_id
-    ).all()
+    course = db.query(Course).filter(
+        Course.id == data.course_id
+    ).first()
 
-    if not questions:
+    if not course:
         raise HTTPException(
             status_code=404,
-            detail="No questions found"
+            detail="Course not found"
         )
 
-    # Create attempt first
+    if not data.answers:
+        raise HTTPException(
+            status_code=400,
+            detail="No answers submitted"
+        )
+
+    # -----------------------------------------------------
+    # Get course questions
+    # -----------------------------------------------------
+
+    course_questions = (
+        db.query(Question)
+        .filter(
+            Question.course_id == data.course_id
+        )
+        .order_by(Question.id)
+        .all()
+    )
+
+    question_map = {
+        q.id: q
+        for q in course_questions
+    }
+
+    # -----------------------------------------------------
+    # Create attempt
+    # -----------------------------------------------------
+
     attempt = TestAttempt(
         trainee_id=data.trainee_id,
         course_id=data.course_id,
         test_type=data.test_type,
         score=0,
-        status="completed",
+        status="completed"
     )
 
     db.add(attempt)
     db.commit()
     db.refresh(attempt)
 
-    question_map = {
-        q.id: q
-        for q in questions
-    }
+    # -----------------------------------------------------
+    # Calculate answers
+    # -----------------------------------------------------
+
+    correct_count = 0
+    total = len(data.answers)
 
     topic_stats = {}
 
-    correct_count = 0
-
-    for submitted in data.answers:
+    for answer_data in data.answers:
 
         question = question_map.get(
-            submitted.question_id
+            answer_data.question_id
         )
 
         if not question:
             continue
 
-        answer = submitted.answer.strip()
-
-        correct = (
-            answer.lower()
-            == question.correct_answer.strip().lower()
+        is_correct = (
+            answer_data.answer.upper()
+            == question.correct_answer.upper()
         )
 
-        if correct:
+        if is_correct:
             correct_count += 1
 
-        answer_record = TestAnswer(
+        answer = TestAnswer(
             attempt_id=attempt.id,
             question_id=question.id,
-            answer=answer,
-            is_correct=correct,
+            answer=answer_data.answer,
+            is_correct=is_correct
         )
 
-        db.add(answer_record)
+        db.add(answer)
 
-        if question.topic_id not in topic_stats:
-            topic_stats[question.topic_id] = {
+        # ---------------------------------------------
+        # Topic statistics
+        # ---------------------------------------------
+
+        topic_id = question.topic_id
+
+        if topic_id not in topic_stats:
+            topic_stats[topic_id] = {
                 "total": 0,
-                "correct": 0,
+                "correct": 0
             }
 
-        topic_stats[question.topic_id]["total"] += 1
+        topic_stats[topic_id]["total"] += 1
 
-        if correct:
-            topic_stats[question.topic_id]["correct"] += 1
+        if is_correct:
+            topic_stats[topic_id]["correct"] += 1
 
-    total_answered = len(data.answers)
+    # -----------------------------------------------------
+    # Score
+    # -----------------------------------------------------
 
-    if total_answered > 0:
-        score = (
-            correct_count / total_answered
-        ) * 100
-    else:
-        score = 0
+    score = (
+        correct_count / total * 100
+        if total > 0
+        else 0
+    )
 
     attempt.score = score
 
-    # Topic results
-    for topic_id, stats in topic_stats.items():
-
-        percentage = (
-            stats["correct"]
-            / stats["total"]
-        ) * 100
-
-        result = TopicResult(
-            attempt_id=attempt.id,
-            topic_id=topic_id,
-            percentage=percentage,
-        )
-
-        db.add(result)
-
     db.commit()
 
-    # Find weak topics
+    # -----------------------------------------------------
+    # Topic results
+    # -----------------------------------------------------
+
     weak_topics = []
 
     for topic_id, stats in topic_stats.items():
@@ -489,41 +585,50 @@ def submit_test(
         percentage = (
             stats["correct"]
             / stats["total"]
-        ) * 100
+            * 100
+            if stats["total"] > 0
+            else 0
+        )
+
+        topic_result = TopicResult(
+            attempt_id=attempt.id,
+            topic_id=topic_id,
+            percentage=percentage
+        )
+
+        db.add(topic_result)
+
+        topic = db.query(Topic).filter(
+            Topic.id == topic_id
+        ).first()
 
         if percentage < 60:
 
-            topic = db.query(Topic).filter(
-                Topic.id == topic_id
-            ).first()
+            weak_topics.append({
+                "topic_id": topic_id,
+                "topic": (
+                    topic.name
+                    if topic
+                    else "Unknown"
+                ),
+                "percentage": percentage
+            })
 
-            if topic:
-                weak_topics.append({
-                    "id": topic.id,
-                    "name": topic.name,
-                    "percentage": round(
-                        percentage,
-                        1
-                    ),
-                })
-
-    weak_topics.sort(
-        key=lambda x: x["percentage"]
-    )
+    db.commit()
 
     return {
         "attempt_id": attempt.id,
-        "score": round(score, 1),
+        "score": round(score, 2),
         "correct": correct_count,
-        "total": total_answered,
+        "total": total,
         "test_type": data.test_type,
-        "weak_topics": weak_topics,
+        "weak_topics": weak_topics
     }
 
 
-# ============================================================
+# =========================================================
 # TEST RESULT
-# ============================================================
+# =========================================================
 
 @app.get("/attempts/{attempt_id}/result")
 def get_attempt_result(
@@ -541,11 +646,15 @@ def get_attempt_result(
             detail="Attempt not found"
         )
 
-    answers = db.query(TestAnswer).filter(
-        TestAnswer.attempt_id == attempt_id
-    ).all()
+    answers = (
+        db.query(TestAnswer)
+        .filter(
+            TestAnswer.attempt_id == attempt_id
+        )
+        .all()
+    )
 
-    result_items = []
+    questions_result = []
 
     for answer in answers:
 
@@ -560,29 +669,40 @@ def get_attempt_result(
             Topic.id == question.topic_id
         ).first()
 
-        options = [
-            question.option_a,
-            question.option_b,
-            question.option_c,
-            question.option_d,
-        ]
-
-        result_items.append({
+        questions_result.append({
             "question_id": question.id,
             "question": question.text,
-            "options": options,
+            "options": [
+                question.option_a,
+                question.option_b,
+                question.option_c,
+                question.option_d
+            ],
             "topic_id": question.topic_id,
-            "topic": topic.name if topic else "General",
+            "topic": (
+                topic.name
+                if topic
+                else "Unknown"
+            ),
             "your_answer": answer.answer,
             "correct_answer": question.correct_answer,
-            "is_correct": answer.is_correct,
+            "is_correct": answer.is_correct
         })
 
-    topic_results = db.query(TopicResult).filter(
-        TopicResult.attempt_id == attempt_id
-    ).all()
+    # -----------------------------------------------------
+    # Topic analysis
+    # -----------------------------------------------------
+
+    topic_results = (
+        db.query(TopicResult)
+        .filter(
+            TopicResult.attempt_id == attempt_id
+        )
+        .all()
+    )
 
     topic_analysis = []
+    weak_topics = []
 
     for result in topic_results:
 
@@ -590,94 +710,193 @@ def get_attempt_result(
             Topic.id == result.topic_id
         ).first()
 
-        topic_analysis.append({
+        item = {
             "topic_id": result.topic_id,
-            "topic": topic.name if topic else "General",
+            "topic": (
+                topic.name
+                if topic
+                else "Unknown"
+            ),
             "percentage": round(
                 result.percentage,
-                1
-            ),
-            "weak": result.percentage < 60,
-        })
+                2
+            )
+        }
 
-    topic_analysis.sort(
-        key=lambda x: x["percentage"]
-    )
+        topic_analysis.append(item)
 
-    weak_topics = [
-        x for x in topic_analysis
-        if x["weak"]
-    ]
+        if result.percentage < 60:
+
+            weak_topics.append(item)
 
     return {
         "attempt_id": attempt.id,
         "course_id": attempt.course_id,
         "test_type": attempt.test_type,
-        "score": round(attempt.score, 1),
-        "questions": result_items,
+        "score": round(attempt.score, 2),
+        "questions": questions_result,
         "topic_analysis": topic_analysis,
-        "weak_topics": weak_topics,
+        "weak_topics": weak_topics
     }
 
 
-# ============================================================
-# TRAINERS
-# ============================================================
+# =========================================================
+# ALL TRAINERS
+# =========================================================
 
 @app.get("/trainers")
 def get_trainers(
     db: Session = Depends(get_db)
 ):
 
-    trainers = db.query(User).filter(
-        User.role == "trainer"
-    ).all()
+    trainers = (
+        db.query(User)
+        .filter(
+            User.role == "trainer"
+        )
+        .order_by(User.id)
+        .all()
+    )
 
     result = []
 
     for trainer in trainers:
 
-        expertise_rows = db.query(TrainerTopic).filter(
-            TrainerTopic.trainer_id == trainer.id
-        ).all()
-
-        expertise = []
-
-        for row in expertise_rows:
-
-            topic = db.query(Topic).filter(
-                Topic.id == row.topic_id
-            ).first()
-
-            if topic:
-                expertise.append({
-                    "id": topic.id,
-                    "name": topic.name,
-                })
-
-        slot_count = db.query(TrainerSlot).filter(
-            TrainerSlot.trainer_id == trainer.id,
-            TrainerSlot.available == True,
-        ).count()
+        available_slots = (
+            db.query(func.count(TrainerSlot.id))
+            .filter(
+                TrainerSlot.trainer_id == trainer.id,
+                TrainerSlot.available == True
+            )
+            .scalar()
+        )
 
         result.append({
             "id": trainer.id,
             "name": trainer.name,
             "email": trainer.email,
             "bio": trainer.bio or "",
-            "expertise": expertise,
-            "available_slots": slot_count,
+            "available_slots": available_slots or 0
         })
 
     return result
 
 
-# ============================================================
-# TRAINER DETAILS
-# ============================================================
+# =========================================================
+# SINGLE TRAINER
+# =========================================================
 
 @app.get("/trainers/{trainer_id}")
 def get_trainer(
+    trainer_id: int,
+    db: Session = Depends(get_db)
+):
+
+    trainer = (
+        db.query(User)
+        .filter(
+            User.id == trainer_id,
+            User.role == "trainer"
+        )
+        .first()
+    )
+
+    if not trainer:
+        raise HTTPException(
+            status_code=404,
+            detail="Trainer not found"
+        )
+
+    available_slots = (
+        db.query(func.count(TrainerSlot.id))
+        .filter(
+            TrainerSlot.trainer_id == trainer_id,
+            TrainerSlot.available == True
+        )
+        .scalar()
+    )
+
+    return {
+        "id": trainer.id,
+        "name": trainer.name,
+        "email": trainer.email,
+        "bio": trainer.bio or "",
+        "available_slots": available_slots or 0
+    }
+
+
+# =========================================================
+# RECOMMENDED TRAINERS
+# =========================================================
+
+@app.get("/trainers/recommended/{topic_id}")
+def recommended_trainers(
+    topic_id: int,
+    db: Session = Depends(get_db)
+):
+
+    topic = db.query(Topic).filter(
+        Topic.id == topic_id
+    ).first()
+
+    if not topic:
+        raise HTTPException(
+            status_code=404,
+            detail="Topic not found"
+        )
+
+    mappings = (
+        db.query(TrainerTopic)
+        .filter(
+            TrainerTopic.topic_id == topic_id
+        )
+        .all()
+    )
+
+    result = []
+
+    for mapping in mappings:
+
+        trainer = db.query(User).filter(
+            User.id == mapping.trainer_id,
+            User.role == "trainer"
+        ).first()
+
+        if not trainer:
+            continue
+
+        slots = (
+            db.query(TrainerSlot)
+            .filter(
+                TrainerSlot.trainer_id == trainer.id,
+                TrainerSlot.available == True
+            )
+            .count()
+        )
+
+        result.append({
+            "id": trainer.id,
+            "name": trainer.name,
+            "email": trainer.email,
+            "bio": trainer.bio or "",
+            "available_slots": slots,
+            "recommended": True
+        })
+
+    result.sort(
+        key=lambda x: x["available_slots"],
+        reverse=True
+    )
+
+    return result
+
+
+# =========================================================
+# TRAINER TOPICS
+# =========================================================
+
+@app.get("/trainers/{trainer_id}/topics")
+def get_trainer_topics(
     trainer_id: int,
     db: Session = Depends(get_db)
 ):
@@ -693,123 +912,36 @@ def get_trainer(
             detail="Trainer not found"
         )
 
-    expertise_rows = db.query(TrainerTopic).filter(
-        TrainerTopic.trainer_id == trainer.id
-    ).all()
-
-    expertise = []
-
-    for row in expertise_rows:
-
-        topic = db.query(Topic).filter(
-            Topic.id == row.topic_id
-        ).first()
-
-        if topic:
-            expertise.append({
-                "id": topic.id,
-                "name": topic.name,
-            })
-
-    return {
-        "id": trainer.id,
-        "name": trainer.name,
-        "email": trainer.email,
-        "bio": trainer.bio or "",
-        "expertise": expertise,
-    }
-
-
-# ============================================================
-# AUTOMATIC TRAINER RECOMMENDATION
-# ============================================================
-
-@app.get("/trainers/recommended/{topic_id}")
-def recommended_trainers(
-    topic_id: int,
-    db: Session = Depends(get_db)
-):
-
-    trainer_topic_rows = db.query(
-        TrainerTopic
-    ).filter(
-        TrainerTopic.topic_id == topic_id
-    ).all()
-
-    result = []
-
-    for row in trainer_topic_rows:
-
-        trainer = db.query(User).filter(
-            User.id == row.trainer_id,
-            User.role == "trainer"
-        ).first()
-
-        if not trainer:
-            continue
-
-        available_slots = db.query(
-            TrainerSlot
-        ).filter(
-            TrainerSlot.trainer_id == trainer.id,
-            TrainerSlot.available == True,
-        ).count()
-
-        result.append({
-            "id": trainer.id,
-            "name": trainer.name,
-            "email": trainer.email,
-            "bio": trainer.bio or "",
-            "available_slots": available_slots,
-            "recommended": available_slots > 0,
-        })
-
-    # Trainer having available slots first
-    result.sort(
-        key=lambda x: (
-            not x["recommended"],
-            -x["available_slots"]
+    mappings = (
+        db.query(TrainerTopic)
+        .filter(
+            TrainerTopic.trainer_id == trainer_id
         )
+        .all()
     )
 
-    return result
-
-
-# ============================================================
-# TRAINER TOPICS
-# ============================================================
-
-@app.get("/trainers/{trainer_id}/topics")
-def get_trainer_topics(
-    trainer_id: int,
-    db: Session = Depends(get_db)
-):
-
-    rows = db.query(TrainerTopic).filter(
-        TrainerTopic.trainer_id == trainer_id
-    ).all()
-
     result = []
 
-    for row in rows:
+    for mapping in mappings:
 
         topic = db.query(Topic).filter(
-            Topic.id == row.topic_id
+            Topic.id == mapping.topic_id
         ).first()
 
         if topic:
+
             result.append({
                 "id": topic.id,
                 "name": topic.name,
-                "course_id": topic.course_id,
+                "course_id": topic.course_id
             })
 
     return result
 
 
-# ============================================================
-# TRAINER SLOTS - GET
-# ============================================================
+# =========================================================
+# TRAINER SLOTS
+# =========================================================
 
 @app.get("/trainers/{trainer_id}/slots")
 def get_trainer_slots(
@@ -817,32 +949,43 @@ def get_trainer_slots(
     db: Session = Depends(get_db)
 ):
 
-    slots = db.query(TrainerSlot).filter(
-        TrainerSlot.trainer_id == trainer_id
-    ).order_by(
-        TrainerSlot.id.desc()
-    ).all()
+    trainer = db.query(User).filter(
+        User.id == trainer_id,
+        User.role == "trainer"
+    ).first()
 
-    result = []
+    if not trainer:
+        raise HTTPException(
+            status_code=404,
+            detail="Trainer not found"
+        )
 
-    for slot in slots:
+    slots = (
+        db.query(TrainerSlot)
+        .filter(
+            TrainerSlot.trainer_id == trainer_id
+        )
+        .order_by(TrainerSlot.id)
+        .all()
+    )
 
-        result.append({
+    return [
+        {
             "id": slot.id,
             "start_time": slot.start_time,
             "end_time": slot.end_time,
-            "available": slot.available,
-        })
+            "available": slot.available
+        }
+        for slot in slots
+    ]
 
-    return result
 
-
-# ============================================================
-# TRAINER SLOTS - CREATE
-# ============================================================
+# =========================================================
+# CREATE TRAINER SLOT
+# =========================================================
 
 @app.post("/trainers/{trainer_id}/slots")
-def create_slot(
+def create_trainer_slot(
     trainer_id: int,
     data: SlotCreate,
     db: Session = Depends(get_db)
@@ -859,17 +1002,11 @@ def create_slot(
             detail="Trainer not found"
         )
 
-    if not data.start_time or not data.end_time:
-        raise HTTPException(
-            status_code=400,
-            detail="Start and end time are required"
-        )
-
     slot = TrainerSlot(
         trainer_id=trainer_id,
         start_time=data.start_time,
         end_time=data.end_time,
-        available=True,
+        available=True
     )
 
     db.add(slot)
@@ -877,31 +1014,32 @@ def create_slot(
     db.refresh(slot)
 
     return {
-        "message": "Slot created",
-        "slot": {
-            "id": slot.id,
-            "start_time": slot.start_time,
-            "end_time": slot.end_time,
-            "available": slot.available,
-        }
+        "id": slot.id,
+        "start_time": slot.start_time,
+        "end_time": slot.end_time,
+        "available": slot.available
     }
 
 
-# ============================================================
-# TRAINER SLOTS - DELETE
-# ============================================================
+# =========================================================
+# DELETE TRAINER SLOT
+# =========================================================
 
 @app.delete("/trainers/{trainer_id}/slots/{slot_id}")
-def delete_slot(
+def delete_trainer_slot(
     trainer_id: int,
     slot_id: int,
     db: Session = Depends(get_db)
 ):
 
-    slot = db.query(TrainerSlot).filter(
-        TrainerSlot.id == slot_id,
-        TrainerSlot.trainer_id == trainer_id
-    ).first()
+    slot = (
+        db.query(TrainerSlot)
+        .filter(
+            TrainerSlot.id == slot_id,
+            TrainerSlot.trainer_id == trainer_id
+        )
+        .first()
+    )
 
     if not slot:
         raise HTTPException(
@@ -909,28 +1047,17 @@ def delete_slot(
             detail="Slot not found"
         )
 
-    booking = db.query(Booking).filter(
-        Booking.slot_id == slot_id,
-        Booking.status == "booked"
-    ).first()
-
-    if booking:
-        raise HTTPException(
-            status_code=400,
-            detail="Booked slot cannot be deleted"
-        )
-
     db.delete(slot)
     db.commit()
 
     return {
-        "message": "Slot deleted"
+        "message": "Slot deleted successfully"
     }
 
 
-# ============================================================
-# BOOKING
-# ============================================================
+# =========================================================
+# CREATE BOOKING
+# =========================================================
 
 @app.post("/bookings")
 def create_booking(
@@ -939,8 +1066,7 @@ def create_booking(
 ):
 
     trainee = db.query(User).filter(
-        User.id == data.trainee_id,
-        User.role == "trainee"
+        User.id == data.trainee_id
     ).first()
 
     if not trainee:
@@ -960,48 +1086,79 @@ def create_booking(
             detail="Trainer not found"
         )
 
+    topic = db.query(Topic).filter(
+        Topic.id == data.topic_id
+    ).first()
+
+    if not topic:
+        raise HTTPException(
+            status_code=404,
+            detail="Topic not found"
+        )
+
     slot = db.query(TrainerSlot).filter(
         TrainerSlot.id == data.slot_id,
-        TrainerSlot.trainer_id == data.trainer_id,
-        TrainerSlot.available == True,
+        TrainerSlot.trainer_id == data.trainer_id
     ).first()
 
     if not slot:
         raise HTTPException(
-            status_code=400,
-            detail="Slot is no longer available"
+            status_code=404,
+            detail="Slot not found"
         )
 
-    expertise = db.query(TrainerTopic).filter(
-        TrainerTopic.trainer_id == data.trainer_id,
-        TrainerTopic.topic_id == data.topic_id
-    ).first()
+    if not slot.available:
+        raise HTTPException(
+            status_code=400,
+            detail="This slot is already booked"
+        )
 
-    if not expertise:
+    # -----------------------------------------------------
+    # Check trainer teaches this topic
+    # -----------------------------------------------------
+
+    trainer_topic = (
+        db.query(TrainerTopic)
+        .filter(
+            TrainerTopic.trainer_id == data.trainer_id,
+            TrainerTopic.topic_id == data.topic_id
+        )
+        .first()
+    )
+
+    if not trainer_topic:
         raise HTTPException(
             status_code=400,
             detail="Trainer does not teach this topic"
         )
+
+    # -----------------------------------------------------
+    # Create booking
+    # -----------------------------------------------------
 
     booking = Booking(
         trainee_id=data.trainee_id,
         trainer_id=data.trainer_id,
         slot_id=data.slot_id,
         topic_id=data.topic_id,
-        status="booked",
+        status="booked"
     )
 
     db.add(booking)
 
-    # Make slot unavailable
+    # Slot becomes unavailable
     slot.available = False
 
     db.commit()
     db.refresh(booking)
 
+    # -----------------------------------------------------
+    # Create lecture
+    # -----------------------------------------------------
+
     lecture = Lecture(
         booking_id=booking.id,
-        status="scheduled",
+        status="scheduled"
     )
 
     db.add(lecture)
@@ -1009,37 +1166,31 @@ def create_booking(
     db.refresh(lecture)
 
     return {
-        "message": "Lecture booked successfully",
-        "booking": {
-            "id": booking.id,
-            "trainer_id": booking.trainer_id,
-            "trainee_id": booking.trainee_id,
-            "topic_id": booking.topic_id,
-            "slot_id": booking.slot_id,
-            "status": booking.status,
-        },
-        "lecture": {
-            "id": lecture.id,
-            "status": lecture.status,
-        }
+        "message": "Booking successful",
+        "booking_id": booking.id,
+        "lecture_id": lecture.id,
+        "status": booking.status
     }
 
 
-# ============================================================
+# =========================================================
 # TRAINEE BOOKINGS
-# ============================================================
+# =========================================================
 
 @app.get("/bookings/trainee/{trainee_id}")
-def trainee_bookings(
+def get_trainee_bookings(
     trainee_id: int,
     db: Session = Depends(get_db)
 ):
 
-    bookings = db.query(Booking).filter(
-        Booking.trainee_id == trainee_id
-    ).order_by(
-        Booking.id.desc()
-    ).all()
+    bookings = (
+        db.query(Booking)
+        .filter(
+            Booking.trainee_id == trainee_id
+        )
+        .order_by(Booking.id.desc())
+        .all()
+    )
 
     result = []
 
@@ -1064,26 +1215,46 @@ def trainee_bookings(
         result.append({
             "booking_id": booking.id,
             "status": booking.status,
-            "trainer": trainer.name if trainer else "Unknown",
+            "trainer": (
+                trainer.name
+                if trainer
+                else "Unknown Trainer"
+            ),
             "trainer_id": booking.trainer_id,
-            "topic": topic.name if topic else "Unknown",
+            "topic": (
+                topic.name
+                if topic
+                else "Unknown Topic"
+            ),
             "topic_id": booking.topic_id,
-            "start_time": slot.start_time if slot else "",
-            "end_time": slot.end_time if slot else "",
-            "lecture_id": lecture.id if lecture else None,
+            "start_time": (
+                slot.start_time
+                if slot
+                else ""
+            ),
+            "end_time": (
+                slot.end_time
+                if slot
+                else ""
+            ),
+            "lecture_id": (
+                lecture.id
+                if lecture
+                else None
+            ),
             "lecture_status": (
                 lecture.status
                 if lecture
                 else None
-            ),
+            )
         })
 
     return result
 
 
-# ============================================================
-# LECTURE COMPLETE
-# ============================================================
+# =========================================================
+# COMPLETE LECTURE
+# =========================================================
 
 @app.post("/lectures/{lecture_id}/complete")
 def complete_lecture(
@@ -1103,37 +1274,33 @@ def complete_lecture(
 
     lecture.status = "completed"
 
-    booking = db.query(Booking).filter(
-        Booking.id == lecture.booking_id
-    ).first()
-
-    if booking:
-        booking.status = "completed"
-
     db.commit()
 
     return {
         "message": "Lecture completed",
         "lecture_id": lecture.id,
-        "status": lecture.status,
+        "status": lecture.status
     }
 
 
-# ============================================================
+# =========================================================
 # TRAINEE PROGRESS
-# ============================================================
+# =========================================================
 
 @app.get("/progress/{trainee_id}")
-def trainee_progress(
+def get_progress(
     trainee_id: int,
     db: Session = Depends(get_db)
 ):
 
-    attempts = db.query(TestAttempt).filter(
-        TestAttempt.trainee_id == trainee_id
-    ).order_by(
-        TestAttempt.id.desc()
-    ).all()
+    attempts = (
+        db.query(TestAttempt)
+        .filter(
+            TestAttempt.trainee_id == trainee_id
+        )
+        .order_by(TestAttempt.id.desc())
+        .all()
+    )
 
     result = []
 
@@ -1143,26 +1310,32 @@ def trainee_progress(
             Course.id == attempt.course_id
         ).first()
 
-        topic_results = db.query(
-            TopicResult
-        ).filter(
-            TopicResult.attempt_id == attempt.id
-        ).all()
+        topic_results = (
+            db.query(TopicResult)
+            .filter(
+                TopicResult.attempt_id == attempt.id
+            )
+            .all()
+        )
 
         topics = []
 
-        for tr in topic_results:
+        for topic_result in topic_results:
 
             topic = db.query(Topic).filter(
-                Topic.id == tr.topic_id
+                Topic.id == topic_result.topic_id
             ).first()
 
             topics.append({
-                "topic": topic.name if topic else "Unknown",
-                "percentage": round(
-                    tr.percentage,
-                    1
+                "topic": (
+                    topic.name
+                    if topic
+                    else "Unknown"
                 ),
+                "percentage": round(
+                    topic_result.percentage,
+                    2
+                )
             })
 
         result.append({
@@ -1171,22 +1344,22 @@ def trainee_progress(
             "course": (
                 course.title
                 if course
-                else "Unknown"
+                else "Unknown Course"
             ),
             "test_type": attempt.test_type,
             "score": round(
                 attempt.score,
-                1
+                2
             ),
-            "topics": topics,
+            "topics": topics
         })
 
     return result
 
 
-# ============================================================
+# =========================================================
 # TRAINER DASHBOARD
-# ============================================================
+# =========================================================
 
 @app.get("/trainers/{trainer_id}/dashboard")
 def trainer_dashboard(
@@ -1205,142 +1378,54 @@ def trainer_dashboard(
             detail="Trainer not found"
         )
 
-    # --------------------------------------------------------
-    # Stats
-    # --------------------------------------------------------
-
-    total_slots = db.query(
-        TrainerSlot
-    ).filter(
-        TrainerSlot.trainer_id == trainer_id
-    ).count()
-
-    available_slots = db.query(
-        TrainerSlot
-    ).filter(
-        TrainerSlot.trainer_id == trainer_id,
-        TrainerSlot.available == True
-    ).count()
-
-    total_bookings = db.query(
-        Booking
-    ).filter(
-        Booking.trainer_id == trainer_id
-    ).count()
-
-    completed_lectures = (
-        db.query(Lecture)
-        .join(
-            Booking,
-            Lecture.booking_id == Booking.id
-        )
-        .filter(
-            Booking.trainer_id == trainer_id,
-            Lecture.status == "completed"
-        )
-        .count()
-    )
-
-    # --------------------------------------------------------
+    # -----------------------------------------------------
     # Expertise
-    # --------------------------------------------------------
+    # -----------------------------------------------------
 
-    expertise_rows = db.query(
-        TrainerTopic
-    ).filter(
-        TrainerTopic.trainer_id == trainer_id
-    ).all()
+    mappings = (
+        db.query(TrainerTopic)
+        .filter(
+            TrainerTopic.trainer_id == trainer_id
+        )
+        .all()
+    )
 
     expertise = []
 
-    for row in expertise_rows:
+    for mapping in mappings:
 
         topic = db.query(Topic).filter(
-            Topic.id == row.topic_id
+            Topic.id == mapping.topic_id
         ).first()
 
         if topic:
+
             expertise.append({
                 "id": topic.id,
                 "name": topic.name,
+                "course_id": topic.course_id
             })
 
-    # --------------------------------------------------------
-    # Students
-    # --------------------------------------------------------
+    # -----------------------------------------------------
+    # Bookings
+    # -----------------------------------------------------
 
-    bookings = db.query(Booking).filter(
-        Booking.trainer_id == trainer_id
-    ).order_by(
-        Booking.id.desc()
-    ).all()
-
-    student_ids = list(
-        set(
-            booking.trainee_id
-            for booking in bookings
+    bookings = (
+        db.query(Booking)
+        .filter(
+            Booking.trainer_id == trainer_id
         )
+        .order_by(Booking.id.desc())
+        .all()
     )
 
-    students = []
+    booking_data = []
 
-    for student_id in student_ids:
-
-        student = db.query(User).filter(
-            User.id == student_id
-        ).first()
-
-        if not student:
-            continue
-
-        attempts = db.query(
-            TestAttempt
-        ).filter(
-            TestAttempt.trainee_id == student_id
-        ).order_by(
-            TestAttempt.id.desc()
-        ).all()
-
-        latest_score = (
-            attempts[0].score
-            if attempts
-            else None
-        )
-
-        completed = db.query(
-            Lecture
-        ).join(
-            Booking,
-            Lecture.booking_id == Booking.id
-        ).filter(
-            Booking.trainer_id == trainer_id,
-            Booking.trainee_id == student_id,
-            Lecture.status == "completed"
-        ).count()
-
-        students.append({
-            "id": student.id,
-            "name": student.name,
-            "email": student.email,
-            "bio": student.bio or "",
-            "latest_score": (
-                round(latest_score, 1)
-                if latest_score is not None
-                else None
-            ),
-            "total_tests": len(attempts),
-            "completed_lectures": completed,
-        })
-
-    # --------------------------------------------------------
-    # Upcoming / all bookings
-    # --------------------------------------------------------
-
-    booking_list = []
+    student_ids = set()
 
     for booking in bookings:
 
-        trainee = db.query(User).filter(
+        student = db.query(User).filter(
             User.id == booking.trainee_id
         ).first()
 
@@ -1352,24 +1437,18 @@ def trainer_dashboard(
             TrainerSlot.id == booking.slot_id
         ).first()
 
-        lecture = db.query(Lecture).filter(
-            Lecture.booking_id == booking.id
-        ).first()
+        student_ids.add(
+            booking.trainee_id
+        )
 
-        booking_list.append({
+        booking_data.append({
             "booking_id": booking.id,
-            "trainee_id": booking.trainee_id,
-            "trainee_name": (
-                trainee.name
-                if trainee
-                else "Unknown"
+            "trainee": (
+                student.name
+                if student
+                else "Unknown Student"
             ),
-            "trainee_email": (
-                trainee.email
-                if trainee
-                else ""
-            ),
-            "topic_id": booking.topic_id,
+            "student_id": booking.trainee_id,
             "topic": (
                 topic.name
                 if topic
@@ -1385,47 +1464,67 @@ def trainer_dashboard(
                 if slot
                 else ""
             ),
-            "booking_status": booking.status,
-            "lecture_status": (
-                lecture.status
-                if lecture
-                else ""
-            ),
+            "status": booking.status
         })
 
-    # --------------------------------------------------------
-    # Return dashboard
-    # --------------------------------------------------------
+    # -----------------------------------------------------
+    # Students
+    # -----------------------------------------------------
+
+    students = []
+
+    for student_id in student_ids:
+
+        student = db.query(User).filter(
+            User.id == student_id
+        ).first()
+
+        if student:
+
+            students.append({
+                "id": student.id,
+                "name": student.name,
+                "email": student.email
+            })
+
+    available_slots = (
+        db.query(TrainerSlot)
+        .filter(
+            TrainerSlot.trainer_id == trainer_id,
+            TrainerSlot.available == True
+        )
+        .count()
+    )
 
     return {
         "profile": {
             "id": trainer.id,
             "name": trainer.name,
             "email": trainer.email,
-            "bio": trainer.bio or "",
+            "bio": trainer.bio or ""
         },
 
         "expertise": expertise,
 
         "stats": {
-            "total_slots": total_slots,
-            "available_slots": available_slots,
-            "total_bookings": total_bookings,
-            "completed_lectures": completed_lectures,
-            "total_students": len(students),
+            "students": len(students),
+            "bookings": len(bookings),
+            "available_slots": available_slots
         },
 
         "students": students,
 
-        "bookings": booking_list,
+        "bookings": booking_data
     }
 
 
-# ============================================================
-# TRAINER - STUDENT PROGRESS
-# ============================================================
+# =========================================================
+# TRAINER → STUDENT PROGRESS
+# =========================================================
 
-@app.get("/trainers/{trainer_id}/students/{student_id}/progress")
+@app.get(
+    "/trainers/{trainer_id}/students/{student_id}/progress"
+)
 def trainer_student_progress(
     trainer_id: int,
     student_id: int,
@@ -1444,8 +1543,7 @@ def trainer_student_progress(
         )
 
     student = db.query(User).filter(
-        User.id == student_id,
-        User.role == "trainee"
+        User.id == student_id
     ).first()
 
     if not student:
@@ -1454,27 +1552,16 @@ def trainer_student_progress(
             detail="Student not found"
         )
 
-    # Check whether this student has booking with trainer
-    booking_exists = db.query(Booking).filter(
-        Booking.trainer_id == trainer_id,
-        Booking.trainee_id == student_id
-    ).first()
-
-    if not booking_exists:
-        raise HTTPException(
-            status_code=403,
-            detail="Student is not assigned to this trainer"
+    attempts = (
+        db.query(TestAttempt)
+        .filter(
+            TestAttempt.trainee_id == student_id
         )
+        .order_by(TestAttempt.id.desc())
+        .all()
+    )
 
-    attempts = db.query(
-        TestAttempt
-    ).filter(
-        TestAttempt.trainee_id == student_id
-    ).order_by(
-        TestAttempt.id.asc()
-    ).all()
-
-    attempt_list = []
+    tests = []
 
     for attempt in attempts:
 
@@ -1482,34 +1569,35 @@ def trainer_student_progress(
             Course.id == attempt.course_id
         ).first()
 
-        topic_results = db.query(
-            TopicResult
-        ).filter(
-            TopicResult.attempt_id == attempt.id
-        ).all()
+        topic_results = (
+            db.query(TopicResult)
+            .filter(
+                TopicResult.attempt_id == attempt.id
+            )
+            .all()
+        )
 
         topics = []
 
-        for tr in topic_results:
+        for topic_result in topic_results:
 
             topic = db.query(Topic).filter(
-                Topic.id == tr.topic_id
+                Topic.id == topic_result.topic_id
             ).first()
 
             topics.append({
-                "topic_id": tr.topic_id,
                 "topic": (
                     topic.name
                     if topic
                     else "Unknown"
                 ),
                 "percentage": round(
-                    tr.percentage,
-                    1
-                ),
+                    topic_result.percentage,
+                    2
+                )
             })
 
-        attempt_list.append({
+        tests.append({
             "attempt_id": attempt.id,
             "course": (
                 course.title
@@ -1519,102 +1607,108 @@ def trainer_student_progress(
             "test_type": attempt.test_type,
             "score": round(
                 attempt.score,
-                1
+                2
             ),
-            "topics": topics,
+            "topics": topics
         })
 
-    bookings = db.query(Booking).filter(
-        Booking.trainer_id == trainer_id,
-        Booking.trainee_id == student_id
-    ).all()
+    bookings = (
+        db.query(Booking)
+        .filter(
+            Booking.trainee_id == student_id,
+            Booking.trainer_id == trainer_id
+        )
+        .all()
+    )
 
-    lecture_history = []
+    lectures = []
 
     for booking in bookings:
-
-        topic = db.query(Topic).filter(
-            Topic.id == booking.topic_id
-        ).first()
-
-        slot = db.query(TrainerSlot).filter(
-            TrainerSlot.id == booking.slot_id
-        ).first()
 
         lecture = db.query(Lecture).filter(
             Lecture.booking_id == booking.id
         ).first()
 
-        lecture_history.append({
-            "booking_id": booking.id,
-            "topic": (
-                topic.name
-                if topic
-                else "Unknown"
-            ),
-            "start_time": (
-                slot.start_time
-                if slot
-                else ""
-            ),
-            "end_time": (
-                slot.end_time
-                if slot
-                else ""
-            ),
-            "status": (
-                lecture.status
-                if lecture
-                else booking.status
-            ),
-        })
+        if lecture:
+
+            lectures.append({
+                "lecture_id": lecture.id,
+                "booking_id": booking.id,
+                "status": lecture.status
+            })
 
     return {
         "student": {
             "id": student.id,
             "name": student.name,
-            "email": student.email,
-            "bio": student.bio or "",
+            "email": student.email
         },
-        "tests": attempt_list,
-        "lectures": lecture_history,
+        "tests": tests,
+        "lectures": lectures
     }
 
 
-# ============================================================
-# ADMIN BASIC DASHBOARD
-# ============================================================
+# =========================================================
+# ADMIN DASHBOARD
+# =========================================================
 
 @app.get("/admin/dashboard")
 def admin_dashboard(
     db: Session = Depends(get_db)
 ):
 
-    trainees = db.query(User).filter(
+    total_users = db.query(
+        func.count(User.id)
+    ).scalar()
+
+    total_trainees = db.query(
+        func.count(User.id)
+    ).filter(
         User.role == "trainee"
-    ).count()
+    ).scalar()
 
-    trainers = db.query(User).filter(
+    total_trainers = db.query(
+        func.count(User.id)
+    ).filter(
         User.role == "trainer"
-    ).count()
+    ).scalar()
 
-    admins = db.query(User).filter(
+    total_admins = db.query(
+        func.count(User.id)
+    ).filter(
         User.role == "admin"
-    ).count()
+    ).scalar()
 
-    courses = db.query(Course).count()
+    total_courses = db.query(
+        func.count(Course.id)
+    ).scalar()
 
-    questions = db.query(Question).count()
+    total_questions = db.query(
+        func.count(Question.id)
+    ).scalar()
 
-    bookings = db.query(Booking).count()
+    total_topics = db.query(
+        func.count(Topic.id)
+    ).scalar()
+
+    total_bookings = db.query(
+        func.count(Booking.id)
+    ).scalar()
+
+    total_attempts = db.query(
+        func.count(TestAttempt.id)
+    ).scalar()
 
     return {
-        "users": {
-            "trainees": trainees,
-            "trainers": trainers,
-            "admins": admins,
-        },
-        "courses": courses,
-        "questions": questions,
-        "bookings": bookings,
+        "users": total_users or 0,
+        "trainees": total_trainees or 0,
+        "trainers": total_trainers or 0,
+        "admins": total_admins or 0,
+
+        "courses": total_courses or 0,
+        "topics": total_topics or 0,
+        "questions": total_questions or 0,
+
+        "bookings": total_bookings or 0,
+        "attempts": total_attempts or 0
     }
