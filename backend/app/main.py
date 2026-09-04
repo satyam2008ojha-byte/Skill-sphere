@@ -2,33 +2,44 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from pydantic import BaseModel, EmailStr
-from typing import List, Optional
-import os
 
-from twilio.rest import Client
-
-from .database import get_db
-from .models import *
-from .schemas import *
+from .database import get_db, Base, engine
+from .models import (
+    User,
+    Course,
+    Topic,
+    Question,
+    TrainerTopic,
+    TrainerSlot,
+    TestAttempt,
+    TestAnswer,
+    Booking,
+    Lecture,
+    TopicResult,
+)
+from .schemas import (
+    LoginRequest,
+    RegisterRequest,
+    TestSubmit,
+    BookingRequest,
+    TrainerProfileUpdate,
+)
 from .seed import seed
 
 
-app = FastAPI(
-    title="SkillSphere API",
-    version="2.0.0"
-)
+app = FastAPI(title="SkillSphere API")
 
 
-# =========================================================
+# ---------------------------------------------------------
 # CORS
-# =========================================================
+# ---------------------------------------------------------
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://skill-sphere-ybm7.vercel.app",
         "http://localhost:5173",
+        "http://127.0.0.1:5173",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -36,81 +47,21 @@ app.add_middleware(
 )
 
 
-# =========================================================
+# ---------------------------------------------------------
 # DATABASE
-# =========================================================
+# ---------------------------------------------------------
 
-seed()
+Base.metadata.create_all(bind=engine)
 
-
-# =========================================================
-# TWILIO
-# =========================================================
-
-TWILIO_ACCOUNT_SID = os.getenv(
-    "TWILIO_ACCOUNT_SID"
-)
-
-TWILIO_AUTH_TOKEN = os.getenv(
-    "TWILIO_AUTH_TOKEN"
-)
-
-TWILIO_VERIFY_SERVICE_SID = os.getenv(
-    "TWILIO_VERIFY_SERVICE_SID"
-)
+try:
+    seed()
+except Exception as e:
+    print("Seed warning:", e)
 
 
-def get_twilio_client():
-
-    if not TWILIO_ACCOUNT_SID:
-        raise HTTPException(
-            status_code=500,
-            detail="TWILIO_ACCOUNT_SID is not configured"
-        )
-
-    if not TWILIO_AUTH_TOKEN:
-        raise HTTPException(
-            status_code=500,
-            detail="TWILIO_AUTH_TOKEN is not configured"
-        )
-
-    if not TWILIO_VERIFY_SERVICE_SID:
-        raise HTTPException(
-            status_code=500,
-            detail="TWILIO_VERIFY_SERVICE_SID is not configured"
-        )
-
-    return Client(
-        TWILIO_ACCOUNT_SID,
-        TWILIO_AUTH_TOKEN
-    )
-
-
-# =========================================================
-# REGISTRATION SCHEMAS
-# =========================================================
-
-class RegisterRequest(BaseModel):
-    name: str
-    email: EmailStr
-    phone: Optional[str] = None
-    password: str
-    channel: str
-
-
-class SendOTPRequest(BaseModel):
-    contact: str
-    channel: str
-
-
-class VerifyOTPRequest(BaseModel):
-    contact: str
-    code: str
-
-
-# =========================================================
-# HOME
-# =========================================================
+# ---------------------------------------------------------
+# ROOT
+# ---------------------------------------------------------
 
 @app.get("/")
 def root():
@@ -119,24 +70,26 @@ def root():
     }
 
 
-# =========================================================
-# LOGIN
-# =========================================================
+# ---------------------------------------------------------
+# AUTH - LOGIN
+# ---------------------------------------------------------
 
 @app.post("/auth/login")
-def login(
-    data: LoginRequest,
-    db: Session = Depends(get_db)
-):
+def login(data: LoginRequest, db: Session = Depends(get_db)):
 
-    email = data.email.strip().lower()
-
-    user = db.query(User).filter(
-        User.email == email,
-        User.password == data.password
-    ).first()
+    user = (
+        db.query(User)
+        .filter(User.email == data.email.lower())
+        .first()
+    )
 
     if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
+
+    if user.password != data.password:
         raise HTTPException(
             status_code=401,
             detail="Invalid email or password"
@@ -146,136 +99,14 @@ def login(
         "id": user.id,
         "name": user.name,
         "email": user.email,
-        "role": user.role
+        "role": user.role,
+        "bio": user.bio or "",
     }
 
 
-# =========================================================
-# SEND OTP
-# =========================================================
-
-@app.post("/auth/send-otp")
-def send_otp(
-    data: SendOTPRequest,
-    db: Session = Depends(get_db)
-):
-
-    channel = data.channel.lower().strip()
-    contact = data.contact.strip()
-
-    if channel not in ["email", "sms"]:
-        raise HTTPException(
-            status_code=400,
-            detail="Channel must be email or sms"
-        )
-
-    # Check if email already registered
-    if channel == "email":
-
-        existing = db.query(User).filter(
-            func.lower(User.email) ==
-            contact.lower()
-        ).first()
-
-        if existing:
-            raise HTTPException(
-                status_code=400,
-                detail="Email is already registered"
-            )
-
-    client = get_twilio_client()
-
-    try:
-
-        verification = client.verify \
-            .v2 \
-            .services(
-                TWILIO_VERIFY_SERVICE_SID
-            ) \
-            .verifications \
-            .create(
-                to=contact,
-                channel=channel
-            )
-
-        return {
-            "success": True,
-            "status": verification.status,
-            "channel": channel
-        }
-
-    except Exception as e:
-
-        print("TWILIO SEND OTP ERROR:", e)
-
-        raise HTTPException(
-            status_code=500,
-            detail=f"Unable to send OTP: {str(e)}"
-        )
-
-
-# =========================================================
-# VERIFY OTP
-# =========================================================
-
-@app.post("/auth/verify-otp")
-def verify_otp(
-    data: VerifyOTPRequest
-):
-
-    contact = data.contact.strip()
-    code = data.code.strip()
-
-    if not code:
-        raise HTTPException(
-            status_code=400,
-            detail="OTP is required"
-        )
-
-    client = get_twilio_client()
-
-    try:
-
-        result = client.verify \
-            .v2 \
-            .services(
-                TWILIO_VERIFY_SERVICE_SID
-            ) \
-            .verification_checks \
-            .create(
-                to=contact,
-                code=code
-            )
-
-        if result.status != "approved":
-
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid or expired OTP"
-            )
-
-        return {
-            "success": True,
-            "verified": True,
-            "message": "OTP verified successfully"
-        }
-
-    except HTTPException:
-        raise
-
-    except Exception as e:
-
-        print("TWILIO VERIFY OTP ERROR:", e)
-
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid or expired OTP"
-        )
-
-
-# =========================================================
-# REGISTER USER
-# =========================================================
+# ---------------------------------------------------------
+# AUTH - REGISTER
+# ---------------------------------------------------------
 
 @app.post("/auth/register")
 def register(
@@ -283,67 +114,69 @@ def register(
     db: Session = Depends(get_db)
 ):
 
-    name = data.name.strip()
-    email = data.email.strip().lower()
-    password = data.password
+    email = data.email.lower().strip()
 
-    if not name:
+    existing_user = (
+        db.query(User)
+        .filter(User.email == email)
+        .first()
+    )
+
+    if existing_user:
         raise HTTPException(
             status_code=400,
-            detail="Name is required"
+            detail="Email already registered"
         )
 
-    if len(password) < 6:
+    if len(data.password) < 6:
         raise HTTPException(
             status_code=400,
             detail="Password must be at least 6 characters"
         )
 
-    existing = db.query(User).filter(
-        func.lower(User.email) == email
-    ).first()
-
-    if existing:
-        raise HTTPException(
-            status_code=400,
-            detail="Email is already registered"
-        )
-
-    user = User(
-        name=name,
+    new_user = User(
+        name=data.name.strip(),
         email=email,
-        password=password,
-        role="trainee"
+        password=data.password,
+        role="trainee",
+        bio="",
     )
 
-    db.add(user)
+    db.add(new_user)
     db.commit()
-    db.refresh(user)
+    db.refresh(new_user)
 
     return {
-        "success": True,
-        "id": user.id,
-        "name": user.name,
-        "email": user.email,
-        "role": user.role
+        "message": "Registration successful",
+        "id": new_user.id,
+        "name": new_user.name,
+        "email": new_user.email,
+        "role": new_user.role,
     }
 
 
-# =========================================================
+# ---------------------------------------------------------
 # COURSES
-# =========================================================
+# ---------------------------------------------------------
 
 @app.get("/courses")
-def get_courses(
-    db: Session = Depends(get_db)
-):
+def get_courses(db: Session = Depends(get_db)):
 
-    return db.query(Course).all()
+    courses = db.query(Course).all()
+
+    return [
+        {
+            "id": course.id,
+            "title": course.title,
+            "description": course.description or "",
+        }
+        for course in courses
+    ]
 
 
-# =========================================================
-# QUESTIONS
-# =========================================================
+# ---------------------------------------------------------
+# COURSE QUESTIONS
+# ---------------------------------------------------------
 
 @app.get("/courses/{course_id}/questions")
 def get_questions(
@@ -351,16 +184,31 @@ def get_questions(
     db: Session = Depends(get_db)
 ):
 
-    questions = db.query(Quiz).filter(
-        Quiz.course_id == course_id
-    ).all()
+    questions = (
+        db.query(Question)
+        .filter(Question.course_id == course_id)
+        .all()
+    )
 
-    return questions
+    return [
+        {
+            "id": q.id,
+            "topic_id": q.topic_id,
+            "text": q.text,
+            "options": [
+                q.option_a,
+                q.option_b,
+                q.option_c,
+                q.option_d,
+            ],
+        }
+        for q in questions
+    ]
 
 
-# =========================================================
+# ---------------------------------------------------------
 # SUBMIT TEST
-# =========================================================
+# ---------------------------------------------------------
 
 @app.post("/tests/submit")
 def submit_test(
@@ -368,9 +216,11 @@ def submit_test(
     db: Session = Depends(get_db)
 ):
 
-    questions = db.query(Quiz).filter(
-        Quiz.course_id == data.course_id
-    ).all()
+    questions = (
+        db.query(Question)
+        .filter(Question.course_id == data.course_id)
+        .all()
+    )
 
     if not questions:
         raise HTTPException(
@@ -383,81 +233,122 @@ def submit_test(
         for item in data.answers
     }
 
-    correct = 0
+    attempt = TestAttempt(
+        trainee_id=data.trainee_id,
+        course_id=data.course_id,
+        test_type=data.test_type,
+        score=0,
+        status="completed",
+    )
+
+    db.add(attempt)
+    db.flush()
+
+    total_correct = 0
 
     topic_total = {}
     topic_correct = {}
 
     for question in questions:
 
-        topic_id = question.topic_id
+        user_answer = answer_map.get(question.id, "")
 
-        topic_total[topic_id] = (
-            topic_total.get(topic_id, 0) + 1
+        user_answer = str(user_answer).strip().upper()
+        correct_answer = str(
+            question.correct_answer
+        ).strip().upper()
+
+        # Support A/B/C/D as well as actual option text
+        if user_answer == str(question.option_a).strip().upper():
+            user_answer = "A"
+        elif user_answer == str(question.option_b).strip().upper():
+            user_answer = "B"
+        elif user_answer == str(question.option_c).strip().upper():
+            user_answer = "C"
+        elif user_answer == str(question.option_d).strip().upper():
+            user_answer = "D"
+
+        if correct_answer == str(question.option_a).strip().upper():
+            correct_answer = "A"
+        elif correct_answer == str(question.option_b).strip().upper():
+            correct_answer = "B"
+        elif correct_answer == str(question.option_c).strip().upper():
+            correct_answer = "C"
+        elif correct_answer == str(question.option_d).strip().upper():
+            correct_answer = "D"
+
+        is_correct = user_answer == correct_answer
+
+        if is_correct:
+            total_correct += 1
+
+        topic_total[question.topic_id] = (
+            topic_total.get(question.topic_id, 0) + 1
         )
 
-        if answer_map.get(question.id) == question.answer:
-
-            correct += 1
-
-            topic_correct[topic_id] = (
-                topic_correct.get(topic_id, 0) + 1
+        if is_correct:
+            topic_correct[question.topic_id] = (
+                topic_correct.get(question.topic_id, 0) + 1
             )
 
-    score = round(
-        (correct / len(questions)) * 100
-    )
-
-    attempt = Attempt(
-        trainee_id=data.trainee_id,
-        course_id=data.course_id,
-        score=score,
-        test_type=data.test_type
-    )
-
-    db.add(attempt)
-    db.commit()
-    db.refresh(attempt)
-
-    weak_topics = []
-
-    for topic_id, total in topic_total.items():
-
-        topic_score = round(
-            (
-                topic_correct.get(
-                    topic_id,
-                    0
-                ) / total
-            ) * 100
+        answer = TestAnswer(
+            attempt_id=attempt.id,
+            question_id=question.id,
+            answer=user_answer,
+            is_correct=is_correct,
         )
 
-        if topic_score < 70:
-            weak_topics.append({
-                "topic_id": topic_id,
-                "percentage": topic_score
-            })
+        db.add(answer)
+
+    overall_score = (
+        total_correct / len(questions)
+    ) * 100
+
+    attempt.score = round(overall_score, 2)
+
+    # Topic results
+    for topic_id, total in topic_total.items():
+
+        correct = topic_correct.get(topic_id, 0)
+
+        percentage = (
+            correct / total
+        ) * 100
+
+        result = TopicResult(
+            attempt_id=attempt.id,
+            topic_id=topic_id,
+            percentage=round(percentage, 2),
+        )
+
+        db.add(result)
+
+    db.commit()
 
     return {
         "attempt_id": attempt.id,
-        "score": score,
-        "weak_topics": weak_topics
+        "score": round(overall_score, 2),
+        "total_questions": len(questions),
+        "correct_answers": total_correct,
+        "test_type": data.test_type,
     }
 
 
-# =========================================================
-# ATTEMPT RESULT
-# =========================================================
+# ---------------------------------------------------------
+# TEST RESULT
+# ---------------------------------------------------------
 
 @app.get("/attempts/{attempt_id}/result")
-def attempt_result(
+def get_attempt_result(
     attempt_id: int,
     db: Session = Depends(get_db)
 ):
 
-    attempt = db.query(Attempt).filter(
-        Attempt.id == attempt_id
-    ).first()
+    attempt = (
+        db.query(TestAttempt)
+        .filter(TestAttempt.id == attempt_id)
+        .first()
+    )
 
     if not attempt:
         raise HTTPException(
@@ -465,21 +356,42 @@ def attempt_result(
             detail="Attempt not found"
         )
 
-    questions = db.query(Quiz).filter(
-        Quiz.course_id == attempt.course_id
-    ).all()
+    results = (
+        db.query(TopicResult, Topic)
+        .join(
+            Topic,
+            Topic.id == TopicResult.topic_id
+        )
+        .filter(
+            TopicResult.attempt_id == attempt_id
+        )
+        .all()
+    )
+
+    topics = []
+
+    for result, topic in results:
+
+        topics.append({
+            "topic_id": topic.id,
+            "topic": topic.name,
+            "percentage": result.percentage,
+            "weak": result.percentage < 70,
+        })
 
     return {
         "attempt_id": attempt.id,
+        "trainee_id": attempt.trainee_id,
+        "course_id": attempt.course_id,
         "test_type": attempt.test_type,
         "score": attempt.score,
-        "topics": []
+        "topics": topics,
     }
 
 
-# =========================================================
-# TRAINER RECOMMENDATION
-# =========================================================
+# ---------------------------------------------------------
+# TRAINERS RECOMMENDED FOR TOPIC
+# ---------------------------------------------------------
 
 @app.get("/trainers/recommended/{topic_id}")
 def recommended_trainers(
@@ -487,36 +399,33 @@ def recommended_trainers(
     db: Session = Depends(get_db)
 ):
 
-    expertise = db.query(
-        TrainerExpertise
-    ).filter(
-        TrainerExpertise.topic_id ==
-        topic_id
-    ).all()
+    trainers = (
+        db.query(User)
+        .join(
+            TrainerTopic,
+            TrainerTopic.trainer_id == User.id
+        )
+        .filter(
+            TrainerTopic.topic_id == topic_id,
+            User.role == "trainer",
+        )
+        .all()
+    )
 
-    result = []
-
-    for item in expertise:
-
-        trainer = db.query(User).filter(
-            User.id == item.trainer_id,
-            User.role == "trainer"
-        ).first()
-
-        if trainer:
-
-            result.append({
-                "id": trainer.id,
-                "name": trainer.name,
-                "bio": trainer.bio
-            })
-
-    return result
+    return [
+        {
+            "id": trainer.id,
+            "name": trainer.name,
+            "email": trainer.email,
+            "bio": trainer.bio or "",
+        }
+        for trainer in trainers
+    ]
 
 
-# =========================================================
+# ---------------------------------------------------------
 # TRAINER SLOTS
-# =========================================================
+# ---------------------------------------------------------
 
 @app.get("/trainers/{trainer_id}/slots")
 def trainer_slots(
@@ -524,15 +433,29 @@ def trainer_slots(
     db: Session = Depends(get_db)
 ):
 
-    return db.query(Slot).filter(
-        Slot.trainer_id == trainer_id,
-        Slot.is_booked == False
-    ).all()
+    slots = (
+        db.query(TrainerSlot)
+        .filter(
+            TrainerSlot.trainer_id == trainer_id,
+            TrainerSlot.available == True,
+        )
+        .all()
+    )
+
+    return [
+        {
+            "id": slot.id,
+            "start_time": slot.start_time,
+            "end_time": slot.end_time,
+            "available": slot.available,
+        }
+        for slot in slots
+    ]
 
 
-# =========================================================
-# BOOKING
-# =========================================================
+# ---------------------------------------------------------
+# BOOK SLOT
+# ---------------------------------------------------------
 
 @app.post("/bookings")
 def create_booking(
@@ -540,40 +463,77 @@ def create_booking(
     db: Session = Depends(get_db)
 ):
 
-    slot = db.query(Slot).filter(
-        Slot.id == data.slot_id,
-        Slot.trainer_id == data.trainer_id,
-        Slot.is_booked == False
-    ).first()
+    slot = (
+        db.query(TrainerSlot)
+        .filter(
+            TrainerSlot.id == data.slot_id,
+            TrainerSlot.trainer_id == data.trainer_id,
+        )
+        .first()
+    )
 
     if not slot:
         raise HTTPException(
-            status_code=400,
-            detail="Slot is not available"
+            status_code=404,
+            detail="Slot not found"
         )
 
-    slot.is_booked = True
+    if not slot.available:
+        raise HTTPException(
+            status_code=400,
+            detail="Slot is already booked"
+        )
+
+    trainee = (
+        db.query(User)
+        .filter(
+            User.id == data.trainee_id,
+            User.role == "trainee",
+        )
+        .first()
+    )
+
+    if not trainee:
+        raise HTTPException(
+            status_code=404,
+            detail="Trainee not found"
+        )
 
     booking = Booking(
         trainee_id=data.trainee_id,
         trainer_id=data.trainer_id,
         slot_id=data.slot_id,
-        topic_id=data.topic_id
+        topic_id=data.topic_id,
+        status="booked",
     )
 
     db.add(booking)
+    db.flush()
+
+    lecture = Lecture(
+        booking_id=booking.id,
+        status="scheduled",
+    )
+
+    db.add(lecture)
+
+    slot.available = False
+
     db.commit()
+
     db.refresh(booking)
+    db.refresh(lecture)
 
     return {
+        "message": "Slot booked successfully",
         "booking_id": booking.id,
-        "lecture_id": booking.id
+        "lecture_id": lecture.id,
     }
 
 
-# =========================================================
+# ---------------------------------------------------------
 # COMPLETE LECTURE
-# =========================================================
+# ---------------------------------------------------------
 
 @app.post("/lectures/{lecture_id}/complete")
 def complete_lecture(
@@ -581,46 +541,419 @@ def complete_lecture(
     db: Session = Depends(get_db)
 ):
 
-    booking = db.query(Booking).filter(
-        Booking.id == lecture_id
-    ).first()
+    lecture = (
+        db.query(Lecture)
+        .filter(Lecture.id == lecture_id)
+        .first()
+    )
 
-    if not booking:
+    if not lecture:
         raise HTTPException(
             status_code=404,
             detail="Lecture not found"
         )
 
-    booking.completed = True
+    lecture.status = "completed"
+
+    booking = (
+        db.query(Booking)
+        .filter(
+            Booking.id == lecture.booking_id
+        )
+        .first()
+    )
+
+    if booking:
+        booking.status = "completed"
 
     db.commit()
 
     return {
-        "success": True,
-        "message": "Lecture completed"
+        "message": "Lecture completed",
+        "lecture_id": lecture.id,
+        "status": lecture.status,
     }
 
 
-# =========================================================
-# PROGRESS
-# =========================================================
+# ---------------------------------------------------------
+# TRAINEE PROGRESS
+# ---------------------------------------------------------
 
 @app.get("/progress/{trainee_id}")
-def progress(
+def trainee_progress(
     trainee_id: int,
     db: Session = Depends(get_db)
 ):
 
-    attempts = db.query(Attempt).filter(
-        Attempt.trainee_id == trainee_id
-    ).all()
+    attempts = (
+        db.query(TestAttempt)
+        .filter(
+            TestAttempt.trainee_id == trainee_id
+        )
+        .order_by(TestAttempt.id.desc())
+        .all()
+    )
 
     return [
         {
-            "id": attempt.id,
+            "attempt_id": attempt.id,
             "course_id": attempt.course_id,
+            "test_type": attempt.test_type,
             "score": attempt.score,
-            "test_type": attempt.test_type
+            "status": attempt.status,
         }
         for attempt in attempts
     ]
+
+
+# ---------------------------------------------------------
+# TRAINER DASHBOARD
+# ---------------------------------------------------------
+
+@app.get("/trainer/{trainer_id}/dashboard")
+def trainer_dashboard(
+    trainer_id: int,
+    db: Session = Depends(get_db)
+):
+
+    trainer = (
+        db.query(User)
+        .filter(
+            User.id == trainer_id,
+            User.role == "trainer",
+        )
+        .first()
+    )
+
+    if not trainer:
+        raise HTTPException(
+            status_code=404,
+            detail="Trainer not found"
+        )
+
+    topics = (
+        db.query(Topic)
+        .join(
+            TrainerTopic,
+            TrainerTopic.topic_id == Topic.id
+        )
+        .filter(
+            TrainerTopic.trainer_id == trainer_id
+        )
+        .all()
+    )
+
+    slots = (
+        db.query(TrainerSlot)
+        .filter(
+            TrainerSlot.trainer_id == trainer_id
+        )
+        .all()
+    )
+
+    bookings = (
+        db.query(Booking)
+        .filter(
+            Booking.trainer_id == trainer_id
+        )
+        .order_by(Booking.id.desc())
+        .all()
+    )
+
+    booking_data = []
+
+    for booking in bookings:
+
+        trainee = (
+            db.query(User)
+            .filter(
+                User.id == booking.trainee_id
+            )
+            .first()
+        )
+
+        topic = (
+            db.query(Topic)
+            .filter(
+                Topic.id == booking.topic_id
+            )
+            .first()
+        )
+
+        lecture = (
+            db.query(Lecture)
+            .filter(
+                Lecture.booking_id == booking.id
+            )
+            .first()
+        )
+
+        booking_data.append({
+            "booking_id": booking.id,
+            "trainee_id": booking.trainee_id,
+            "trainee_name": (
+                trainee.name
+                if trainee
+                else "Unknown"
+            ),
+            "trainee_email": (
+                trainee.email
+                if trainee
+                else ""
+            ),
+            "topic_id": booking.topic_id,
+            "topic": (
+                topic.name
+                if topic
+                else "Unknown"
+            ),
+            "status": booking.status,
+            "lecture_id": (
+                lecture.id
+                if lecture
+                else None
+            ),
+            "lecture_status": (
+                lecture.status
+                if lecture
+                else None
+            ),
+        })
+
+    return {
+        "trainer": {
+            "id": trainer.id,
+            "name": trainer.name,
+            "email": trainer.email,
+            "bio": trainer.bio or "",
+        },
+        "topics": [
+            {
+                "id": topic.id,
+                "name": topic.name,
+            }
+            for topic in topics
+        ],
+        "slots": [
+            {
+                "id": slot.id,
+                "start_time": slot.start_time,
+                "end_time": slot.end_time,
+                "available": slot.available,
+            }
+            for slot in slots
+        ],
+        "bookings": booking_data,
+    }
+
+
+# ---------------------------------------------------------
+# TRAINER PROFILE UPDATE
+# ---------------------------------------------------------
+
+@app.put("/trainer/{trainer_id}/profile")
+def update_trainer_profile(
+    trainer_id: int,
+    data: TrainerProfileUpdate,
+    db: Session = Depends(get_db)
+):
+
+    trainer = (
+        db.query(User)
+        .filter(
+            User.id == trainer_id,
+            User.role == "trainer",
+        )
+        .first()
+    )
+
+    if not trainer:
+        raise HTTPException(
+            status_code=404,
+            detail="Trainer not found"
+        )
+
+    if data.name is not None:
+        trainer.name = data.name.strip()
+
+    if data.bio is not None:
+        trainer.bio = data.bio.strip()
+
+    db.commit()
+    db.refresh(trainer)
+
+    return {
+        "message": "Profile updated",
+        "id": trainer.id,
+        "name": trainer.name,
+        "email": trainer.email,
+        "bio": trainer.bio or "",
+    }
+
+
+# ---------------------------------------------------------
+# TRAINER ADD SLOT
+# ---------------------------------------------------------
+
+@app.post("/trainer/{trainer_id}/slots")
+def add_trainer_slot(
+    trainer_id: int,
+    start_time: str,
+    end_time: str,
+    db: Session = Depends(get_db)
+):
+
+    trainer = (
+        db.query(User)
+        .filter(
+            User.id == trainer_id,
+            User.role == "trainer",
+        )
+        .first()
+    )
+
+    if not trainer:
+        raise HTTPException(
+            status_code=404,
+            detail="Trainer not found"
+        )
+
+    slot = TrainerSlot(
+        trainer_id=trainer_id,
+        start_time=start_time,
+        end_time=end_time,
+        available=True,
+    )
+
+    db.add(slot)
+    db.commit()
+    db.refresh(slot)
+
+    return {
+        "message": "Slot added",
+        "id": slot.id,
+        "start_time": slot.start_time,
+        "end_time": slot.end_time,
+        "available": slot.available,
+    }
+
+
+# ---------------------------------------------------------
+# TRAINER REMOVE SLOT
+# ---------------------------------------------------------
+
+@app.delete("/trainer/{trainer_id}/slots/{slot_id}")
+def delete_trainer_slot(
+    trainer_id: int,
+    slot_id: int,
+    db: Session = Depends(get_db)
+):
+
+    slot = (
+        db.query(TrainerSlot)
+        .filter(
+            TrainerSlot.id == slot_id,
+            TrainerSlot.trainer_id == trainer_id,
+        )
+        .first()
+    )
+
+    if not slot:
+        raise HTTPException(
+            status_code=404,
+            detail="Slot not found"
+        )
+
+    if not slot.available:
+        raise HTTPException(
+            status_code=400,
+            detail="Booked slot cannot be deleted"
+        )
+
+    db.delete(slot)
+    db.commit()
+
+    return {
+        "message": "Slot deleted"
+    }
+
+
+# ---------------------------------------------------------
+# TRAINER BOOKINGS
+# ---------------------------------------------------------
+
+@app.get("/trainer/{trainer_id}/bookings")
+def trainer_bookings(
+    trainer_id: int,
+    db: Session = Depends(get_db)
+):
+
+    bookings = (
+        db.query(Booking)
+        .filter(
+            Booking.trainer_id == trainer_id
+        )
+        .order_by(Booking.id.desc())
+        .all()
+    )
+
+    result = []
+
+    for booking in bookings:
+
+        trainee = (
+            db.query(User)
+            .filter(
+                User.id == booking.trainee_id
+            )
+            .first()
+        )
+
+        topic = (
+            db.query(Topic)
+            .filter(
+                Topic.id == booking.topic_id
+            )
+            .first()
+        )
+
+        lecture = (
+            db.query(Lecture)
+            .filter(
+                Lecture.booking_id == booking.id
+            )
+            .first()
+        )
+
+        result.append({
+            "booking_id": booking.id,
+            "trainee_id": booking.trainee_id,
+            "trainee_name": (
+                trainee.name
+                if trainee
+                else "Unknown"
+            ),
+            "trainee_email": (
+                trainee.email
+                if trainee
+                else ""
+            ),
+            "topic": (
+                topic.name
+                if topic
+                else "Unknown"
+            ),
+            "status": booking.status,
+            "lecture_id": (
+                lecture.id
+                if lecture
+                else None
+            ),
+            "lecture_status": (
+                lecture.status
+                if lecture
+                else None
+            ),
+        })
+
+    return result
