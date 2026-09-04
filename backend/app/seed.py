@@ -1,153 +1,194 @@
 from .database import Base, engine, SessionLocal
-from .models import User, Course, Topic, Question, TrainerTopic, TrainerSlot
+from .models import (
+    User,
+    Course,
+    Topic,
+    Question,
+    TrainerTopic,
+    TrainerSlot,
+)
 
 
 def seed():
+    # Create tables if they don't exist
     Base.metadata.create_all(bind=engine)
 
     db = SessionLocal()
 
     try:
-        # If database already has users, don't seed again
-        if db.query(User).count():
-            return
+        # =========================================================
+        # 1. USERS
+        # =========================================================
 
-        # ---------------------------------------------------------
-        # USERS
-        # ---------------------------------------------------------
-
-        trainee = User(
-            name="Demo Trainee",
-            email="trainee@skillsphere.com",
-            password="123456",
-            role="trainee"
-        )
-
-        trainer1 = User(
-            name="Aarav Sharma",
-            email="aarav@skillsphere.com",
-            password="123456",
-            role="trainer",
-            bio="Python and programming mentor."
-        )
-
-        trainer2 = User(
-            name="Neha Verma",
-            email="neha@skillsphere.com",
-            password="123456",
-            role="trainer",
-            bio="SQL and database mentor."
-        )
-
-        trainer3 = User(
-            name="Rohan Singh",
-            email="rohan@skillsphere.com",
-            password="123456",
-            role="trainer",
-            bio="Cloud and AWS fundamentals mentor."
-        )
-
-        admin = User(
-            name="Admin",
-            email="admin@skillsphere.com",
-            password="123456",
-            role="admin"
-        )
-
-        db.add_all([
-            trainee,
-            trainer1,
-            trainer2,
-            trainer3,
-            admin
-        ])
-
-        db.commit()
-
-        # ---------------------------------------------------------
-        # COURSES
-        # ---------------------------------------------------------
-
-        courses = [
-            Course(
-                title="Python Fundamentals",
-                description="Core Python concepts for beginners"
-            ),
-            Course(
-                title="SQL Fundamentals",
-                description="Queries, joins and database basics"
-            ),
-            Course(
-                title="Cloud Computing Basics",
-                description="Cloud and AWS fundamentals"
-            )
+        users_data = [
+            {
+                "name": "Demo Trainee",
+                "email": "trainee@skillsphere.com",
+                "password": "123456",
+                "role": "trainee",
+                "bio": "",
+            },
+            {
+                "name": "Aarav Sharma",
+                "email": "aarav@skillsphere.com",
+                "password": "123456",
+                "role": "trainer",
+                "bio": "Python and programming mentor.",
+            },
+            {
+                "name": "Neha Verma",
+                "email": "neha@skillsphere.com",
+                "password": "123456",
+                "role": "trainer",
+                "bio": "SQL and database mentor.",
+            },
+            {
+                "name": "Rohan Singh",
+                "email": "rohan@skillsphere.com",
+                "password": "123456",
+                "role": "trainer",
+                "bio": "Cloud and AWS fundamentals mentor.",
+            },
+            {
+                "name": "Admin",
+                "email": "admin@skillsphere.com",
+                "password": "123456",
+                "role": "admin",
+                "bio": "",
+            },
         ]
 
-        db.add_all(courses)
+        created_users = {}
+
+        for data in users_data:
+            user = (
+                db.query(User)
+                .filter(User.email == data["email"])
+                .first()
+            )
+
+            if user:
+                # Existing user -> update credentials/details
+                user.name = data["name"]
+                user.password = data["password"]
+                user.role = data["role"]
+                user.bio = data["bio"]
+            else:
+                # New user
+                user = User(
+                    name=data["name"],
+                    email=data["email"],
+                    password=data["password"],
+                    role=data["role"],
+                    bio=data["bio"],
+                )
+                db.add(user)
+
+            db.flush()
+            created_users[data["email"]] = user
+
         db.commit()
 
-        # ---------------------------------------------------------
-        # TOPICS
-        # ---------------------------------------------------------
+        trainee = created_users["trainee@skillsphere.com"]
+        trainer1 = created_users["aarav@skillsphere.com"]
+        trainer2 = created_users["neha@skillsphere.com"]
+        trainer3 = created_users["rohan@skillsphere.com"]
+
+        # =========================================================
+        # 2. COURSES
+        # =========================================================
+
+        course_data = [
+            (
+                "Python Fundamentals",
+                "Core Python concepts for beginners",
+            ),
+            (
+                "SQL Fundamentals",
+                "Queries, joins and database basics",
+            ),
+            (
+                "Cloud Computing Basics",
+                "Cloud and AWS fundamentals",
+            ),
+        ]
+
+        courses = []
+
+        for title, description in course_data:
+            course = (
+                db.query(Course)
+                .filter(Course.title == title)
+                .first()
+            )
+
+            if not course:
+                course = Course(
+                    title=title,
+                    description=description,
+                )
+                db.add(course)
+                db.flush()
+
+            courses.append(course)
+
+        db.commit()
+
+        # =========================================================
+        # 3. TOPICS
+        # =========================================================
+
+        topic_names = {
+            courses[0].id: [
+                "Variables & Data Types",
+                "Control Flow",
+                "Functions",
+            ],
+            courses[1].id: [
+                "SELECT & Filtering",
+                "Joins",
+                "Aggregation",
+            ],
+            courses[2].id: [
+                "Cloud Basics",
+                "AWS Services",
+                "Security Basics",
+            ],
+        }
 
         topic_map = {}
 
-        course_topics = [
-            (
-                courses[0],
-                [
-                    "Variables & Data Types",
-                    "Control Flow",
-                    "Functions"
-                ]
-            ),
-            (
-                courses[1],
-                [
-                    "SELECT & Filtering",
-                    "Joins",
-                    "Aggregation"
-                ]
-            ),
-            (
-                courses[2],
-                [
-                    "Cloud Basics",
-                    "AWS Services",
-                    "Security Basics"
-                ]
-            )
-        ]
-
-        for course, topic_names in course_topics:
-            for topic_name in topic_names:
-
-                topic = Topic(
-                    course_id=course.id,
-                    name=topic_name
+        for course_id, names in topic_names.items():
+            for name in names:
+                topic = (
+                    db.query(Topic)
+                    .filter(
+                        Topic.course_id == course_id,
+                        Topic.name == name,
+                    )
+                    .first()
                 )
 
-                db.add(topic)
-                db.flush()
+                if not topic:
+                    topic = Topic(
+                        course_id=course_id,
+                        name=name,
+                    )
+                    db.add(topic)
+                    db.flush()
 
-                topic_map[topic_name] = topic.id
+                topic_map[name] = topic.id
 
-        # ---------------------------------------------------------
-        # QUESTIONS
-        # 15 QUESTIONS PER COURSE
-        # 5 QUESTIONS PER TOPIC
-        # ---------------------------------------------------------
+        db.commit()
+
+        # =========================================================
+        # 4. QUESTIONS
+        # =========================================================
 
         qsets = [
-
-            # =====================================================
-            # PYTHON
-            # =====================================================
-
             (
                 courses[0],
                 [
-
                     (
                         "Variables & Data Types",
                         [
@@ -157,7 +198,7 @@ def seed():
                                 "Dictionary",
                                 "Tuple",
                                 "Set",
-                                "C"
+                                "C",
                             ),
                             (
                                 "What is the type of 10?",
@@ -165,7 +206,7 @@ def seed():
                                 "int",
                                 "float",
                                 "bool",
-                                "B"
+                                "B",
                             ),
                             (
                                 "Which stores key-value pairs?",
@@ -173,7 +214,7 @@ def seed():
                                 "Tuple",
                                 "Dictionary",
                                 "Set",
-                                "C"
+                                "C",
                             ),
                             (
                                 "What does len('hello') return?",
@@ -181,7 +222,7 @@ def seed():
                                 "5",
                                 "6",
                                 "0",
-                                "B"
+                                "B",
                             ),
                             (
                                 "Which converts text to integer?",
@@ -189,11 +230,10 @@ def seed():
                                 "float()",
                                 "int()",
                                 "list()",
-                                "C"
-                            )
-                        ]
+                                "C",
+                            ),
+                        ],
                     ),
-
                     (
                         "Control Flow",
                         [
@@ -203,7 +243,7 @@ def seed():
                                 "if",
                                 "def",
                                 "try",
-                                "B"
+                                "B",
                             ),
                             (
                                 "Which repeats over items?",
@@ -211,7 +251,7 @@ def seed():
                                 "for",
                                 "class",
                                 "import",
-                                "B"
+                                "B",
                             ),
                             (
                                 "What does break do?",
@@ -219,7 +259,7 @@ def seed():
                                 "Ends loop",
                                 "Starts loop",
                                 "Defines function",
-                                "B"
+                                "B",
                             ),
                             (
                                 "Which is a comparison operator?",
@@ -227,7 +267,7 @@ def seed():
                                 "==",
                                 "+",
                                 "//",
-                                "B"
+                                "B",
                             ),
                             (
                                 "What is elif used for?",
@@ -235,11 +275,10 @@ def seed():
                                 "Loop",
                                 "Function",
                                 "Import",
-                                "A"
-                            )
-                        ]
+                                "A",
+                            ),
+                        ],
                     ),
-
                     (
                         "Functions",
                         [
@@ -249,7 +288,7 @@ def seed():
                                 "function",
                                 "def",
                                 "lambda",
-                                "C"
+                                "C",
                             ),
                             (
                                 "How do you return a value?",
@@ -257,7 +296,7 @@ def seed():
                                 "return",
                                 "send",
                                 "output",
-                                "B"
+                                "B",
                             ),
                             (
                                 "Arguments are passed inside?",
@@ -265,7 +304,7 @@ def seed():
                                 "{}",
                                 "()",
                                 "<>",
-                                "C"
+                                "C",
                             ),
                             (
                                 "A function can return?",
@@ -273,7 +312,7 @@ def seed():
                                 "Only text",
                                 "Multiple values",
                                 "Nothing ever",
-                                "C"
+                                "C",
                             ),
                             (
                                 "Anonymous function is commonly called?",
@@ -281,21 +320,15 @@ def seed():
                                 "inline",
                                 "anon",
                                 "quick",
-                                "A"
-                            )
-                        ]
-                    )
-                ]
+                                "A",
+                            ),
+                        ],
+                    ),
+                ],
             ),
-
-            # =====================================================
-            # SQL
-            # =====================================================
-
             (
                 courses[1],
                 [
-
                     (
                         "SELECT & Filtering",
                         [
@@ -305,7 +338,7 @@ def seed():
                                 "GET",
                                 "FETCHROW",
                                 "READ",
-                                "A"
+                                "A",
                             ),
                             (
                                 "Which filters rows?",
@@ -313,7 +346,7 @@ def seed():
                                 "WHEN",
                                 "FILTER",
                                 "HAVINGONLY",
-                                "A"
+                                "A",
                             ),
                             (
                                 "Sort results with?",
@@ -321,7 +354,7 @@ def seed():
                                 "SORT",
                                 "GROUP",
                                 "ARRANGE",
-                                "A"
+                                "A",
                             ),
                             (
                                 "Remove duplicate rows with?",
@@ -329,7 +362,7 @@ def seed():
                                 "DISTINCT",
                                 "ONLY",
                                 "DEDUP",
-                                "B"
+                                "B",
                             ),
                             (
                                 "Wildcard for any characters?",
@@ -337,11 +370,10 @@ def seed():
                                 "%",
                                 "*",
                                 "?",
-                                "B"
-                            )
-                        ]
+                                "B",
+                            ),
+                        ],
                     ),
-
                     (
                         "Joins",
                         [
@@ -351,7 +383,7 @@ def seed():
                                 "LEFT JOIN",
                                 "CROSS JOIN",
                                 "SELF JOIN",
-                                "A"
+                                "A",
                             ),
                             (
                                 "Keeps all left rows?",
@@ -359,7 +391,7 @@ def seed():
                                 "LEFT JOIN",
                                 "INNER JOIN",
                                 "CROSS JOIN",
-                                "B"
+                                "B",
                             ),
                             (
                                 "Cartesian product is?",
@@ -367,7 +399,7 @@ def seed():
                                 "LEFT",
                                 "CROSS",
                                 "RIGHT",
-                                "C"
+                                "C",
                             ),
                             (
                                 "Join condition commonly uses?",
@@ -375,7 +407,7 @@ def seed():
                                 "AT",
                                 "WITH",
                                 "BY",
-                                "A"
+                                "A",
                             ),
                             (
                                 "A table can be joined to itself using?",
@@ -383,11 +415,10 @@ def seed():
                                 "DOUBLE JOIN",
                                 "LOOP JOIN",
                                 "REPEAT",
-                                "A"
-                            )
-                        ]
+                                "A",
+                            ),
+                        ],
                     ),
-
                     (
                         "Aggregation",
                         [
@@ -397,7 +428,7 @@ def seed():
                                 "COUNT",
                                 "TOTAL",
                                 "ROWS",
-                                "B"
+                                "B",
                             ),
                             (
                                 "Average uses?",
@@ -405,7 +436,7 @@ def seed():
                                 "MEAN",
                                 "AVERAGE",
                                 "MID",
-                                "A"
+                                "A",
                             ),
                             (
                                 "Groups rows with?",
@@ -413,7 +444,7 @@ def seed():
                                 "ORDER BY",
                                 "COLLECT",
                                 "PACK",
-                                "A"
+                                "A",
                             ),
                             (
                                 "Filters groups with?",
@@ -421,7 +452,7 @@ def seed():
                                 "HAVING",
                                 "GROUPFILTER",
                                 "AFTER",
-                                "B"
+                                "B",
                             ),
                             (
                                 "Largest value with?",
@@ -429,21 +460,15 @@ def seed():
                                 "TOP",
                                 "HIGH",
                                 "LARGE",
-                                "A"
-                            )
-                        ]
-                    )
-                ]
+                                "A",
+                            ),
+                        ],
+                    ),
+                ],
             ),
-
-            # =====================================================
-            # CLOUD COMPUTING
-            # =====================================================
-
             (
                 courses[2],
                 [
-
                     (
                         "Cloud Basics",
                         [
@@ -453,7 +478,7 @@ def seed():
                                 "USB",
                                 "Printer",
                                 "Bluetooth",
-                                "A"
+                                "A",
                             ),
                             (
                                 "Pay-as-you-go means?",
@@ -461,7 +486,7 @@ def seed():
                                 "Pay for usage",
                                 "Free forever",
                                 "One-time payment",
-                                "B"
+                                "B",
                             ),
                             (
                                 "IaaS provides?",
@@ -469,7 +494,7 @@ def seed():
                                 "Only software",
                                 "Only data",
                                 "Emails",
-                                "A"
+                                "A",
                             ),
                             (
                                 "Scalability means?",
@@ -477,7 +502,7 @@ def seed():
                                 "Delete data",
                                 "Encrypt password",
                                 "Write code",
-                                "A"
+                                "A",
                             ),
                             (
                                 "Public cloud is?",
@@ -485,11 +510,10 @@ def seed():
                                 "Your laptop",
                                 "Offline server",
                                 "USB drive",
-                                "A"
-                            )
-                        ]
+                                "A",
+                            ),
+                        ],
                     ),
-
                     (
                         "AWS Services",
                         [
@@ -499,7 +523,7 @@ def seed():
                                 "Object storage",
                                 "DNS only",
                                 "Database only",
-                                "A"
+                                "A",
                             ),
                             (
                                 "S3 is?",
@@ -507,7 +531,7 @@ def seed():
                                 "Compute",
                                 "Queue",
                                 "Firewall",
-                                "A"
+                                "A",
                             ),
                             (
                                 "RDS provides?",
@@ -515,7 +539,7 @@ def seed():
                                 "DNS",
                                 "Files only",
                                 "Containers only",
-                                "A"
+                                "A",
                             ),
                             (
                                 "Lambda is?",
@@ -523,7 +547,7 @@ def seed():
                                 "Storage",
                                 "Networking",
                                 "Monitoring",
-                                "A"
+                                "A",
                             ),
                             (
                                 "CloudFront is?",
@@ -531,11 +555,10 @@ def seed():
                                 "Database",
                                 "VM",
                                 "IAM user",
-                                "A"
-                            )
-                        ]
+                                "A",
+                            ),
+                        ],
                     ),
-
                     (
                         "Security Basics",
                         [
@@ -545,7 +568,7 @@ def seed():
                                 "Images",
                                 "Servers only",
                                 "DNS",
-                                "A"
+                                "A",
                             ),
                             (
                                 "Least privilege means?",
@@ -553,7 +576,7 @@ def seed():
                                 "Admin for all",
                                 "No passwords",
                                 "Public access",
-                                "A"
+                                "A",
                             ),
                             (
                                 "MFA adds?",
@@ -561,7 +584,7 @@ def seed():
                                 "More storage",
                                 "Faster CPU",
                                 "Backup",
-                                "A"
+                                "A",
                             ),
                             (
                                 "Encryption protects?",
@@ -569,7 +592,7 @@ def seed():
                                 "Only CPU",
                                 "Network speed",
                                 "Billing",
-                                "A"
+                                "A",
                             ),
                             (
                                 "Security groups act as?",
@@ -577,115 +600,151 @@ def seed():
                                 "Database",
                                 "Storage",
                                 "DNS",
-                                "A"
-                            )
-                        ]
-                    )
-                ]
-            )
+                                "A",
+                            ),
+                        ],
+                    ),
+                ],
+            ),
         ]
 
-        # ---------------------------------------------------------
-        # INSERT QUESTIONS
-        # ---------------------------------------------------------
-
+        # Only add questions if the course doesn't already have them.
+        # This prevents duplicate questions every Render restart.
         for course, topics in qsets:
+            existing_count = (
+                db.query(Question)
+                .filter(Question.course_id == course.id)
+                .count()
+            )
 
-            for topic_name, questions in topics:
+            if existing_count == 0:
+                for topic_name, questions in topics:
+                    topic_id = topic_map[topic_name]
 
-                topic_id = topic_map[topic_name]
-
-                for (
-                    text,
-                    option_a,
-                    option_b,
-                    option_c,
-                    option_d,
-                    correct_answer
-                ) in questions:
-
-                    question = Question(
-                        course_id=course.id,
-                        topic_id=topic_id,
-                        text=text,
-                        option_a=option_a,
-                        option_b=option_b,
-                        option_c=option_c,
-                        option_d=option_d,
-                        correct_answer=correct_answer
-                    )
-
-                    db.add(question)
+                    for (
+                        text,
+                        option_a,
+                        option_b,
+                        option_c,
+                        option_d,
+                        correct_answer,
+                    ) in questions:
+                        db.add(
+                            Question(
+                                course_id=course.id,
+                                topic_id=topic_id,
+                                text=text,
+                                option_a=option_a,
+                                option_b=option_b,
+                                option_c=option_c,
+                                option_d=option_d,
+                                correct_answer=correct_answer,
+                            )
+                        )
 
         db.commit()
 
-        # ---------------------------------------------------------
-        # TRAINER EXPERTISE
-        # ---------------------------------------------------------
+        # =========================================================
+        # 5. TRAINER EXPERTISE
+        # =========================================================
 
-        trainer_expertise = [
+        trainer_topics = [
             (
                 trainer1,
                 [
                     "Variables & Data Types",
                     "Control Flow",
-                    "Functions"
-                ]
+                    "Functions",
+                ],
             ),
             (
                 trainer2,
                 [
                     "SELECT & Filtering",
                     "Joins",
-                    "Aggregation"
-                ]
+                    "Aggregation",
+                ],
             ),
             (
                 trainer3,
                 [
                     "Cloud Basics",
                     "AWS Services",
-                    "Security Basics"
-                ]
-            )
+                    "Security Basics",
+                ],
+            ),
         ]
 
-        for trainer, topic_names in trainer_expertise:
+        for trainer, topic_list in trainer_topics:
+            for topic_name in topic_list:
+                topic_id = topic_map[topic_name]
 
-            for topic_name in topic_names:
-
-                trainer_topic = TrainerTopic(
-                    trainer_id=trainer.id,
-                    topic_id=topic_map[topic_name]
+                exists = (
+                    db.query(TrainerTopic)
+                    .filter(
+                        TrainerTopic.trainer_id == trainer.id,
+                        TrainerTopic.topic_id == topic_id,
+                    )
+                    .first()
                 )
 
-                db.add(trainer_topic)
-
-        # ---------------------------------------------------------
-        # TRAINER AVAILABLE SLOTS
-        # ---------------------------------------------------------
-
-        trainer_slots = [
-            ("10:00", "11:00"),
-            ("14:00", "15:00"),
-            ("17:00", "18:00")
-        ]
-
-        for trainer in [trainer1, trainer2, trainer3]:
-
-            for start_time, end_time in trainer_slots:
-
-                slot = TrainerSlot(
-                    trainer_id=trainer.id,
-                    start_time=start_time,
-                    end_time=end_time
-                )
-
-                db.add(slot)
+                if not exists:
+                    db.add(
+                        TrainerTopic(
+                            trainer_id=trainer.id,
+                            topic_id=topic_id,
+                        )
+                    )
 
         db.commit()
 
-        print("SkillSphere database seeded successfully.")
+        # =========================================================
+        # 6. TRAINER SLOTS
+        # =========================================================
+
+        slot_times = [
+            ("10:00", "11:00"),
+            ("14:00", "15:00"),
+            ("17:00", "18:00"),
+        ]
+
+        for trainer in [trainer1, trainer2, trainer3]:
+            for start_time, end_time in slot_times:
+                exists = (
+                    db.query(TrainerSlot)
+                    .filter(
+                        TrainerSlot.trainer_id == trainer.id,
+                        TrainerSlot.start_time == start_time,
+                        TrainerSlot.end_time == end_time,
+                    )
+                    .first()
+                )
+
+                if not exists:
+                    db.add(
+                        TrainerSlot(
+                            trainer_id=trainer.id,
+                            start_time=start_time,
+                            end_time=end_time,
+                            available=True,
+                        )
+                    )
+
+        db.commit()
+
+        print("==========================================")
+        print("SkillSphere seed completed successfully")
+        print("Demo Trainee: trainee@skillsphere.com / 123456")
+        print("Aarav:        aarav@skillsphere.com / 123456")
+        print("Neha:         neha@skillsphere.com / 123456")
+        print("Rohan:        rohan@skillsphere.com / 123456")
+        print("Admin:        admin@skillsphere.com / 123456")
+        print("==========================================")
+
+    except Exception as e:
+        db.rollback()
+        print("SEED ERROR:", e)
+        raise
 
     finally:
         db.close()
