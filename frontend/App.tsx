@@ -1,6 +1,19 @@
 import React, { useEffect, useState } from "react";
 
-const API_BASE = "https://skillsphere-backend-dcg2.onrender.com";
+const API_BASE =
+  "https://skillsphere-backend-dcg2.onrender.com";
+
+type Page =
+  | "dashboard"
+  | "courses"
+  | "teachers"
+  | "bookings"
+  | "progress"
+  | "profile"
+  | "settings"
+  | "trainer"
+  | "admin"
+  | "login";
 
 type User = {
   id: number;
@@ -13,7 +26,7 @@ type User = {
 type Course = {
   id: number;
   title: string;
-  description?: string;
+  description: string;
   topic_count?: number;
   question_count?: number;
 };
@@ -29,7 +42,12 @@ type Question = {
   course_id: number;
   topic_id: number;
   text: string;
-  options: string[];
+  options: {
+    A: string;
+    B: string;
+    C: string;
+    D: string;
+  };
 };
 
 type Trainer = {
@@ -61,15 +79,28 @@ type Booking = {
   lecture_status?: string;
 };
 
+type WeakTopic = {
+  topic_id: number;
+  topic: string;
+  percentage: number;
+};
+
 type TestResult = {
   attempt_id: number;
   course_id: number;
   test_type: string;
   score: number;
+  correct?: number;
+  total?: number;
   questions: {
     question_id: number;
     question: string;
-    options: string[];
+    options: {
+      A: string;
+      B: string;
+      C: string;
+      D: string;
+    };
     topic_id: number;
     topic: string;
     your_answer: string;
@@ -77,14 +108,11 @@ type TestResult = {
     is_correct: boolean;
   }[];
   topic_analysis: {
-    topic: string;
-    percentage: number;
-  }[];
-  weak_topics: {
     topic_id: number;
     topic: string;
     percentage: number;
   }[];
+  weak_topics: WeakTopic[];
 };
 
 function text(value: unknown, fallback = "") {
@@ -106,37 +134,33 @@ function initials(value: unknown) {
 }
 
 async function api<T>(
-  endpoint: string,
+  path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const response = await fetch(`${API_BASE}${endpoint}`, {
-    ...options,
+  const response = await fetch(`${API_BASE}${path}`, {
     headers: {
       "Content-Type": "application/json",
       ...(options.headers || {}),
     },
+    ...options,
   });
 
-  const body = await response.text();
-
-  let data: any = null;
-
-  try {
-    data = body ? JSON.parse(body) : null;
-  } catch {
-    data = body;
-  }
+  const data = await response.json().catch(() => null);
 
   if (!response.ok) {
     throw new Error(
       data?.detail ||
         data?.message ||
-        `Request failed: ${response.status}`
+        "Something went wrong"
     );
   }
 
   return data as T;
 }
+
+/* =========================================================
+   COMMON COMPONENTS
+========================================================= */
 
 function Button({
   children,
@@ -151,13 +175,13 @@ function Button({
   disabled?: boolean;
   type?: "button" | "submit";
 }) {
-  const style = {
+  const classes = {
     primary:
-      "bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-100",
+      "bg-indigo-600 text-white hover:bg-indigo-700",
     secondary:
-      "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50",
+      "bg-white border border-slate-300 text-slate-700 hover:bg-slate-50",
     danger:
-      "bg-red-50 border border-red-200 text-red-600 hover:bg-red-100",
+      "bg-red-600 text-white hover:bg-red-700",
     ghost:
       "bg-transparent text-slate-600 hover:bg-slate-100",
   };
@@ -167,7 +191,13 @@ function Button({
       type={type}
       onClick={onClick}
       disabled={disabled}
-      className={`rounded-xl px-4 py-2.5 font-semibold transition ${style[variant]}`}
+      className={`px-4 py-2 rounded-xl font-semibold transition ${
+        classes[variant]
+      } ${
+        disabled
+          ? "opacity-50 cursor-not-allowed"
+          : ""
+      }`}
     >
       {children}
     </button>
@@ -183,7 +213,7 @@ function Card({
 }) {
   return (
     <div
-      className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${className}`}
+      className={`bg-white rounded-2xl border border-slate-200 shadow-sm ${className}`}
     >
       {children}
     </div>
@@ -192,20 +222,15 @@ function Card({
 
 function Loading() {
   return (
-    <div className="flex min-h-[300px] items-center justify-center">
-      <div className="text-center">
-        <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-indigo-600" />
-        <p className="mt-3 text-slate-500">Loading...</p>
-      </div>
+    <div className="flex justify-center py-12">
+      <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
     </div>
   );
 }
 
 function ErrorBox({ message }: { message: string }) {
-  if (!message) return null;
-
   return (
-    <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 mb-5">
       {message}
     </div>
   );
@@ -215,20 +240,18 @@ function Input({
   label,
   value,
   onChange,
-  placeholder,
   type = "text",
-  required = false,
+  placeholder = "",
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
-  placeholder?: string;
   type?: string;
-  required?: boolean;
+  placeholder?: string;
 }) {
   return (
     <div>
-      <label className="mb-1.5 block text-sm font-semibold text-slate-700">
+      <label className="block text-sm font-semibold text-slate-700 mb-2">
         {label}
       </label>
 
@@ -237,58 +260,67 @@ function Input({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        required={required}
-        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50"
+        className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
       />
     </div>
   );
 }
 
 function NavButton({
-  children,
+  icon,
+  label,
   active,
   onClick,
 }: {
-  children: React.ReactNode;
+  icon: string;
+  label: string;
   active: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       onClick={onClick}
-      className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold ${
+      className={`flex items-center gap-2 px-4 py-2 rounded-xl font-semibold transition ${
         active
-          ? "bg-indigo-50 text-indigo-700"
-          : "text-slate-500 hover:bg-slate-50"
+          ? "bg-indigo-600 text-white"
+          : "text-slate-600 hover:bg-slate-100"
       }`}
     >
-      {children}
+      <span>{icon}</span>
+      <span>{label}</span>
     </button>
   );
 }
 
 /* =========================================================
-   MAIN APP
+   APP
 ========================================================= */
 
 export default function App() {
   const [user, setUser] = useState<User | null>(() => {
-    try {
-      const saved = localStorage.getItem("skillsphere_user");
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
+    const saved = localStorage.getItem(
+      "skillsphere_user"
+    );
+
+    return saved ? JSON.parse(saved) : null;
   });
 
-  const [page, setPage] = useState("dashboard");
-  const [error, setError] = useState("");
+  const [page, setPage] =
+    useState<Page>("dashboard");
 
-  function loginUser(newUser: User) {
-    setUser(newUser);
+  const [selectedCourse, setSelectedCourse] =
+    useState<Course | null>(null);
+
+  const [testResult, setTestResult] =
+    useState<TestResult | null>(null);
+
+  const [loading, setLoading] = useState(false);
+
+  function loginUser(data: User) {
+    setUser(data);
     localStorage.setItem(
       "skillsphere_user",
-      JSON.stringify(newUser)
+      JSON.stringify(data)
     );
     setPage("dashboard");
   }
@@ -296,7 +328,7 @@ export default function App() {
   function logout() {
     localStorage.removeItem("skillsphere_user");
     setUser(null);
-    setPage("dashboard");
+    setPage("login");
   }
 
   if (!user) {
@@ -312,79 +344,65 @@ export default function App() {
         logout={logout}
       />
 
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        {error && (
-          <ErrorBox
-            message={error}
-          />
-        )}
-
+      <main className="max-w-7xl mx-auto px-4 py-8">
         {page === "dashboard" && (
           <Dashboard
             user={user}
             setPage={setPage}
-            setError={setError}
+            setSelectedCourse={setSelectedCourse}
           />
         )}
 
         {page === "courses" && (
           <CoursesPage
             user={user}
+            selectedCourse={selectedCourse}
+            setSelectedCourse={setSelectedCourse}
+            setTestResult={setTestResult}
             setPage={setPage}
-            setError={setError}
           />
         )}
 
         {page === "teachers" && (
-          <TeachersPage
-            user={user}
-            setError={setError}
-          />
+          <TeachersPage user={user} />
         )}
 
         {page === "bookings" && (
-          <BookingsPage
-            user={user}
-            setError={setError}
-          />
+          <BookingsPage user={user} />
         )}
 
         {page === "progress" && (
-          <ProgressPage
-            user={user}
-            setError={setError}
-          />
+          <ProgressPage user={user} />
         )}
 
         {page === "profile" && (
           <ProfilePage
             user={user}
             setUser={setUser}
-            setError={setError}
           />
         )}
 
         {page === "settings" && (
-          <SettingsPage
-            user={user}
-            setError={setError}
-          />
+          <SettingsPage user={user} />
         )}
 
-        {page === "trainer-dashboard" &&
+        {page === "trainer" &&
           user.role === "trainer" && (
-            <TrainerDashboard
-              user={user}
-              setError={setError}
-            />
+            <TrainerDashboard user={user} />
           )}
 
-        {page === "admin-dashboard" &&
+        {page === "admin" &&
           user.role === "admin" && (
-            <AdminDashboard
-              setError={setError}
-            />
+            <AdminDashboard />
           )}
+
+        {page === "login" && (
+          <Dashboard
+            user={user}
+            setPage={setPage}
+            setSelectedCourse={setSelectedCourse}
+          />
+        )}
       </main>
     </div>
   );
@@ -399,20 +417,24 @@ function AuthScreen({
 }: {
   onLogin: (user: User) => void;
 }) {
-  const [mode, setMode] = useState<"login" | "register">(
-    "login"
-  );
+  const [mode, setMode] =
+    useState<"login" | "register">("login");
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [role, setRole] = useState("trainee");
+  const [password, setPassword] =
+    useState("");
+  const [role, setRole] =
+    useState("trainee");
   const [bio, setBio] = useState("");
 
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] =
+    useState(false);
 
-  async function submit(e: React.FormEvent) {
+  async function submit(
+    e: React.FormEvent
+  ) {
     e.preventDefault();
 
     setError("");
@@ -420,7 +442,7 @@ function AuthScreen({
 
     try {
       if (mode === "login") {
-        const result = await api<User>(
+        const data = await api<User>(
           "/auth/login",
           {
             method: "POST",
@@ -431,9 +453,9 @@ function AuthScreen({
           }
         );
 
-        onLogin(result);
+        onLogin(data);
       } else {
-        const result = await api<User>(
+        const data = await api<User>(
           "/auth/register",
           {
             method: "POST",
@@ -447,11 +469,13 @@ function AuthScreen({
           }
         );
 
-        onLogin(result);
+        onLogin(data);
       }
-    } catch (err: any) {
+    } catch (err) {
       setError(
-        err.message || "Something went wrong"
+        err instanceof Error
+          ? err.message
+          : "Authentication failed"
       );
     } finally {
       setLoading(false);
@@ -459,32 +483,31 @@ function AuthScreen({
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-sky-50 px-4">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-600 via-purple-600 to-blue-600 flex items-center justify-center px-4">
       <div className="w-full max-w-md">
-        <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-600 text-2xl font-black text-white">
-            S
+        <div className="text-center text-white mb-8">
+          <div className="text-5xl mb-3">
+            🎓
           </div>
 
-          <h1 className="text-3xl font-black text-slate-900">
+          <h1 className="text-4xl font-black">
             SkillSphere
           </h1>
 
-          <p className="mt-2 text-slate-500">
+          <p className="text-indigo-100 mt-2">
             Competency Based Learning Platform
           </p>
         </div>
 
-        <Card className="p-6 sm:p-8">
-          <div className="mb-6 grid grid-cols-2 rounded-xl bg-slate-100 p-1">
+        <Card className="p-7">
+          <div className="flex mb-6 bg-slate-100 p-1 rounded-xl">
             <button
-              onClick={() => {
-                setMode("login");
-                setError("");
-              }}
-              className={`rounded-lg py-2.5 font-bold ${
+              onClick={() =>
+                setMode("login")
+              }
+              className={`flex-1 py-2 rounded-lg font-semibold ${
                 mode === "login"
-                  ? "bg-white text-indigo-600 shadow"
+                  ? "bg-white shadow text-indigo-600"
                   : "text-slate-500"
               }`}
             >
@@ -492,13 +515,12 @@ function AuthScreen({
             </button>
 
             <button
-              onClick={() => {
-                setMode("register");
-                setError("");
-              }}
-              className={`rounded-lg py-2.5 font-bold ${
+              onClick={() =>
+                setMode("register")
+              }
+              className={`flex-1 py-2 rounded-lg font-semibold ${
                 mode === "register"
-                  ? "bg-white text-indigo-600 shadow"
+                  ? "bg-white shadow text-indigo-600"
                   : "text-slate-500"
               }`}
             >
@@ -506,9 +528,7 @@ function AuthScreen({
             </button>
           </div>
 
-          {error && (
-            <ErrorBox message={error} />
-          )}
+          {error && <ErrorBox message={error} />}
 
           <form
             onSubmit={submit}
@@ -521,11 +541,10 @@ function AuthScreen({
                   value={name}
                   onChange={setName}
                   placeholder="Enter your name"
-                  required
                 />
 
                 <div>
-                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Role
                   </label>
 
@@ -534,36 +553,26 @@ function AuthScreen({
                     onChange={(e) =>
                       setRole(e.target.value)
                     }
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-300"
                   >
                     <option value="trainee">
                       Trainee
                     </option>
-
                     <option value="trainer">
                       Trainer
                     </option>
-
                     <option value="admin">
                       Admin
                     </option>
                   </select>
                 </div>
 
-                <div>
-                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">
-                    Bio
-                  </label>
-
-                  <textarea
-                    value={bio}
-                    onChange={(e) =>
-                      setBio(e.target.value)
-                    }
-                    className="w-full rounded-xl border border-slate-200 px-4 py-3"
-                    placeholder="Short bio"
-                  />
-                </div>
+                <Input
+                  label="Bio"
+                  value={bio}
+                  onChange={setBio}
+                  placeholder="Short bio"
+                />
               </>
             )}
 
@@ -573,7 +582,6 @@ function AuthScreen({
               value={email}
               onChange={setEmail}
               placeholder="you@example.com"
-              required
             />
 
             <Input
@@ -582,7 +590,6 @@ function AuthScreen({
               value={password}
               onChange={setPassword}
               placeholder="••••••••"
-              required
             />
 
             <Button
@@ -613,189 +620,183 @@ function Header({
   logout,
 }: {
   user: User;
-  page: string;
-  setPage: (page: string) => void;
+  page: Page;
+  setPage: (page: Page) => void;
   logout: () => void;
 }) {
-  const [menu, setMenu] = useState(false);
-
   return (
-    <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
-        <button
-          onClick={() => setPage("dashboard")}
-          className="flex items-center gap-3"
-        >
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 font-black text-white">
-            S
-          </div>
-
-          <div className="text-left">
-            <div className="font-black text-slate-900">
-              SkillSphere
-            </div>
-
-            <div className="text-xs text-slate-400">
-              Learning Platform
-            </div>
-          </div>
-        </button>
-
-        <nav className="hidden items-center gap-1 md:flex">
-          <NavButton
-            active={page === "dashboard"}
-            onClick={() => setPage("dashboard")}
-          >
-            Home
-          </NavButton>
-
-          <NavButton
-            active={page === "courses"}
-            onClick={() => setPage("courses")}
-          >
-            📚 Courses
-          </NavButton>
-
-          <NavButton
-            active={page === "teachers"}
-            onClick={() => setPage("teachers")}
-          >
-            👨‍🏫 Teachers
-          </NavButton>
-
-          <NavButton
-            active={page === "bookings"}
-            onClick={() => setPage("bookings")}
-          >
-            📅 Bookings
-          </NavButton>
-
-          <NavButton
-            active={page === "progress"}
-            onClick={() => setPage("progress")}
-          >
-            📊 Progress
-          </NavButton>
-
-          {user.role === "trainer" && (
-            <NavButton
-              active={
-                page === "trainer-dashboard"
-              }
-              onClick={() =>
-                setPage("trainer-dashboard")
-              }
-            >
-              Trainer
-            </NavButton>
-          )}
-
-          {user.role === "admin" && (
-            <NavButton
-              active={
-                page === "admin-dashboard"
-              }
-              onClick={() =>
-                setPage("admin-dashboard")
-              }
-            >
-              Admin
-            </NavButton>
-          )}
-        </nav>
-
-        <div className="relative">
+    <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
+      <div className="max-w-7xl mx-auto px-4">
+        <div className="h-16 flex items-center justify-between">
           <button
-            onClick={() => setMenu(!menu)}
-            className="flex items-center gap-2 rounded-xl p-1.5 hover:bg-slate-100"
+            onClick={() => setPage("dashboard")}
+            className="flex items-center gap-2"
           >
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 font-bold text-indigo-700">
-              {initials(user.name)}
-            </div>
+            <span className="text-3xl">
+              🎓
+            </span>
 
-            <div className="hidden text-left sm:block">
-              <div className="max-w-32 truncate text-sm font-bold">
-                {text(user.name, "User")}
-              </div>
-
-              <div className="text-xs capitalize text-slate-400">
-                {text(user.role, "trainee")}
-              </div>
-            </div>
-
-            <span>⌄</span>
+            <span className="text-xl font-black text-indigo-600">
+              SkillSphere
+            </span>
           </button>
 
-          {menu && (
-            <div className="absolute right-0 top-14 w-52 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
-              <button
-                onClick={() => {
-                  setPage("profile");
-                  setMenu(false);
-                }}
-                className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold hover:bg-slate-50"
-              >
-                👤 Profile
-              </button>
+          <div className="hidden lg:flex items-center gap-1">
+            <NavButton
+              icon="🏠"
+              label="Dashboard"
+              active={page === "dashboard"}
+              onClick={() =>
+                setPage("dashboard")
+              }
+            />
 
-              <button
-                onClick={() => {
-                  setPage("settings");
-                  setMenu(false);
-                }}
-                className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold hover:bg-slate-50"
-              >
-                ⚙️ Settings
-              </button>
+            <NavButton
+              icon="📚"
+              label="Courses"
+              active={page === "courses"}
+              onClick={() =>
+                setPage("courses")
+              }
+            />
 
-              <div className="my-1 border-t" />
+            <NavButton
+              icon="👨‍🏫"
+              label="Teachers"
+              active={page === "teachers"}
+              onClick={() =>
+                setPage("teachers")
+              }
+            />
 
-              <button
-                onClick={logout}
-                className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-red-600 hover:bg-red-50"
-              >
-                🚪 Logout
-              </button>
+            <NavButton
+              icon="📅"
+              label="Bookings"
+              active={page === "bookings"}
+              onClick={() =>
+                setPage("bookings")
+              }
+            />
+
+            <NavButton
+              icon="📈"
+              label="Progress"
+              active={page === "progress"}
+              onClick={() =>
+                setPage("progress")
+              }
+            />
+
+            {user.role === "trainer" && (
+              <NavButton
+                icon="👨‍🏫"
+                label="Trainer"
+                active={page === "trainer"}
+                onClick={() =>
+                  setPage("trainer")
+                }
+              />
+            )}
+
+            {user.role === "admin" && (
+              <NavButton
+                icon="⚙️"
+                label="Admin"
+                active={page === "admin"}
+                onClick={() =>
+                  setPage("admin")
+                }
+              />
+            )}
+          </div>
+
+          <div className="relative group">
+            <button className="flex items-center gap-2">
+              <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                {initials(user.name)}
+              </div>
+
+              <div className="hidden md:block text-left">
+                <div className="font-semibold text-sm">
+                  {user.name}
+                </div>
+
+                <div className="text-xs text-slate-500 capitalize">
+                  {user.role}
+                </div>
+              </div>
+
+              <span>⌄</span>
+            </button>
+
+            <div className="absolute right-0 top-full pt-2 hidden group-hover:block">
+              <div className="bg-white border border-slate-200 shadow-xl rounded-xl w-48 p-2">
+                <button
+                  onClick={() =>
+                    setPage("profile")
+                  }
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100"
+                >
+                  👤 Profile
+                </button>
+
+                <button
+                  onClick={() =>
+                    setPage("settings")
+                  }
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100"
+                >
+                  ⚙️ Settings
+                </button>
+
+                <button
+                  onClick={logout}
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-50 text-red-600"
+                >
+                  🚪 Logout
+                </button>
+              </div>
             </div>
-          )}
+          </div>
         </div>
-      </div>
 
-      <div className="flex gap-1 overflow-x-auto border-t px-3 py-2 md:hidden">
-        <NavButton
-          active={page === "dashboard"}
-          onClick={() => setPage("dashboard")}
-        >
-          Home
-        </NavButton>
+        <div className="lg:hidden flex gap-2 overflow-x-auto pb-3">
+          <NavButton
+            icon="🏠"
+            label="Home"
+            active={page === "dashboard"}
+            onClick={() =>
+              setPage("dashboard")
+            }
+          />
 
-        <NavButton
-          active={page === "courses"}
-          onClick={() => setPage("courses")}
-        >
-          📚 Courses
-        </NavButton>
+          <NavButton
+            icon="📚"
+            label="Courses"
+            active={page === "courses"}
+            onClick={() =>
+              setPage("courses")
+            }
+          />
 
-        <NavButton
-          active={page === "teachers"}
-          onClick={() => setPage("teachers")}
-        >
-          👨‍🏫 Teachers
-        </NavButton>
+          <NavButton
+            icon="👨‍🏫"
+            label="Teachers"
+            active={page === "teachers"}
+            onClick={() =>
+              setPage("teachers")
+            }
+          />
 
-        <NavButton
-          active={page === "bookings"}
-          onClick={() => setPage("bookings")}
-        >
-          📅 Bookings
-        </NavButton>
-
-        <NavButton
-          active={page === "progress"}
-          onClick={() => setPage("progress")}
-        >
-          📊 Progress
-        </NavButton>
+          <NavButton
+            icon="📅"
+            label="Bookings"
+            active={page === "bookings"}
+            onClick={() =>
+              setPage("bookings")
+            }
+          />
+        </div>
       </div>
     </header>
   );
@@ -808,149 +809,162 @@ function Header({
 function Dashboard({
   user,
   setPage,
-  setError,
+  setSelectedCourse,
 }: {
   user: User;
-  setPage: (page: string) => void;
-  setError: (error: string) => void;
+  setPage: (page: Page) => void;
+  setSelectedCourse: (course: Course) => void;
 }) {
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [bookings, setBookings] = useState<Booking[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [courses, setCourses] =
+    useState<Course[]>([]);
+
+  const [loading, setLoading] =
+    useState(true);
 
   useEffect(() => {
-    Promise.all([
-      api<Course[]>("/courses"),
-      api<Booking[]>(
-        `/bookings/trainee/${user.id}`
-      ),
-    ])
-      .then(([courseData, bookingData]) => {
-        setCourses(courseData);
-        setBookings(bookingData);
-      })
-      .catch((err) =>
-        setError(err.message)
-      )
+    api<Course[]>("/courses")
+      .then(setCourses)
+      .catch(console.error)
       .finally(() => setLoading(false));
-  }, [user.id, setError]);
-
-  if (loading) return <Loading />;
+  }, []);
 
   return (
     <div className="space-y-8">
-      <section className="rounded-3xl bg-gradient-to-r from-indigo-600 to-violet-600 p-6 text-white shadow-xl sm:p-10">
+      <section className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-3xl p-8 md:p-10 text-white">
         <div className="max-w-3xl">
-          <div className="text-sm font-bold uppercase tracking-wider text-indigo-200">
-            Welcome Back
-          </div>
-
-          <h1 className="mt-2 text-3xl font-black sm:text-4xl">
-            Hello, {text(user.name, "Learner")} 👋
-          </h1>
-
-          <p className="mt-3 text-indigo-100">
-            Identify your weak topics, connect with the
-            right trainer and improve your skills.
+          <p className="text-indigo-100 mb-2">
+            Welcome back 👋
           </p>
 
-          <div className="mt-6 flex flex-wrap gap-3">
+          <h1 className="text-4xl md:text-5xl font-black">
+            Hi, {user.name}
+          </h1>
+
+          <p className="mt-4 text-indigo-100 text-lg">
+            Build your skills, identify your weak
+            topics and learn from the right trainer.
+          </p>
+
+          <div className="flex flex-wrap gap-3 mt-6">
             <Button
-              onClick={() => setPage("courses")}
+              onClick={() =>
+                setPage("courses")
+              }
             >
               📚 Explore Courses
             </Button>
 
-            <button
-              onClick={() => setPage("teachers")}
-              className="rounded-xl border border-white/30 bg-white/10 px-4 py-2.5 font-semibold text-white"
+            <Button
+              variant="secondary"
+              onClick={() =>
+                setPage("teachers")
+              }
             >
               👨‍🏫 Find a Teacher
-            </button>
+            </Button>
           </div>
         </div>
       </section>
 
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid md:grid-cols-3 gap-5">
         <Stat
           icon="📚"
           title="Courses"
           value={courses.length}
-          onClick={() => setPage("courses")}
+        />
+
+        <Stat
+          icon="🎯"
+          title="Learning Mode"
+          value="Adaptive"
         />
 
         <Stat
           icon="👨‍🏫"
-          title="Teachers"
-          value="Explore"
-          onClick={() => setPage("teachers")}
-        />
-
-        <Stat
-          icon="📅"
-          title="Bookings"
-          value={bookings.length}
-          onClick={() => setPage("bookings")}
-        />
-
-        <Stat
-          icon="📊"
-          title="Progress"
-          value="View"
-          onClick={() => setPage("progress")}
+          title="Trainers"
+          value="Available"
         />
       </div>
 
       <section>
-        <div className="mb-5">
-          <h2 className="text-2xl font-black">
-            Start Learning
-          </h2>
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h2 className="text-2xl font-black text-slate-800">
+              Popular Courses
+            </h2>
 
-          <p className="text-sm text-slate-500">
-            Choose a course and take the MCQ diagnostic
-            test.
-          </p>
+            <p className="text-slate-500">
+              Start with a diagnostic test
+            </p>
+          </div>
+
+          <Button
+            variant="ghost"
+            onClick={() =>
+              setPage("courses")
+            }
+          >
+            View all →
+          </Button>
         </div>
 
-        <div className="grid gap-5 md:grid-cols-3">
-          {courses.slice(0, 3).map((course) => (
-            <Card
-              key={course.id}
-              className="overflow-hidden"
-            >
-              <div className="h-2 bg-indigo-600" />
+        {loading ? (
+          <Loading />
+        ) : (
+          <div className="grid md:grid-cols-3 gap-5">
+            {courses.map((course) => (
+              <Card
+                key={course.id}
+                className="p-6 hover:shadow-lg transition"
+              >
+                <div className="text-4xl mb-4">
+                  {course.title
+                    .toLowerCase()
+                    .includes("python")
+                    ? "🐍"
+                    : course.title
+                        .toLowerCase()
+                        .includes("cyber")
+                    ? "🔐"
+                    : course.title
+                        .toLowerCase()
+                        .includes("database")
+                    ? "🗄️"
+                    : "📚"}
+                </div>
 
-              <div className="p-5">
-                <span className="rounded-lg bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-600">
-                  COURSE
-                </span>
-
-                <h3 className="mt-4 text-xl font-black">
-                  {text(course.title, "Course")}
+                <h3 className="text-xl font-black">
+                  {course.title}
                 </h3>
 
-                <p className="mt-2 line-clamp-2 text-sm text-slate-500">
-                  {text(
-                    course.description,
-                    "Assess your current competency."
-                  )}
+                <p className="text-slate-500 mt-2 min-h-12">
+                  {course.description}
                 </p>
 
-                <button
-                  onClick={() =>
-                    setPage(
-                      `course-${course.id}`
-                    )
-                  }
-                  className="mt-5 w-full rounded-xl bg-indigo-600 py-3 font-bold text-white"
-                >
-                  Open Course →
-                </button>
-              </div>
-            </Card>
-          ))}
-        </div>
+                <div className="flex gap-2 mt-5 text-sm text-slate-500">
+                  <span>
+                    📖 {course.topic_count || 0} Topics
+                  </span>
+
+                  <span>
+                    📝 {course.question_count || 0} MCQs
+                  </span>
+                </div>
+
+                <div className="mt-5">
+                  <Button
+                    onClick={() => {
+                      setSelectedCourse(course);
+                      setPage("courses");
+                    }}
+                  >
+                    Open Course →
+                  </Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );
@@ -960,54 +974,55 @@ function Stat({
   icon,
   title,
   value,
-  onClick,
 }: {
   icon: string;
   title: string;
   value: React.ReactNode;
-  onClick: () => void;
 }) {
   return (
-    <button
-      onClick={onClick}
-      className="text-left"
-    >
-      <Card className="p-5 hover:shadow-md">
-        <div className="text-2xl">
-          {icon}
-        </div>
+    <Card className="p-5 flex items-center gap-4">
+      <div className="text-3xl">
+        {icon}
+      </div>
 
-        <div className="mt-4 text-2xl font-black">
-          {value}
-        </div>
-
-        <div className="mt-1 text-sm text-slate-500">
+      <div>
+        <p className="text-sm text-slate-500">
           {title}
-        </div>
-      </Card>
-    </button>
+        </p>
+
+        <p className="text-2xl font-black">
+          {value}
+        </p>
+      </div>
+    </Card>
   );
 }
 
 /* =========================================================
-   COURSES + COURSE LIST
+   COURSES
 ========================================================= */
 
 function CoursesPage({
   user,
+  selectedCourse,
+  setSelectedCourse,
+  setTestResult,
   setPage,
-  setError,
 }: {
   user: User;
-  setPage: (page: string) => void;
-  setError: (error: string) => void;
+  selectedCourse: Course | null;
+  setSelectedCourse: (course: Course | null) => void;
+  setTestResult: (result: TestResult) => void;
+  setPage: (page: Page) => void;
 }) {
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [selectedCourse, setSelectedCourse] =
-    useState<number | null>(null);
+  const [courses, setCourses] =
+    useState<Course[]>([]);
 
   const [loading, setLoading] =
     useState(true);
+
+  const [error, setError] =
+    useState("");
 
   useEffect(() => {
     api<Course[]>("/courses")
@@ -1016,116 +1031,106 @@ function CoursesPage({
         setError(err.message)
       )
       .finally(() => setLoading(false));
-  }, [setError]);
+  }, []);
 
-  if (selectedCourse !== null) {
+  if (selectedCourse) {
     return (
       <CourseTest
-        courseId={selectedCourse}
         user={user}
-        setPage={setPage}
-        setError={setError}
+        course={selectedCourse}
         onBack={() =>
           setSelectedCourse(null)
         }
+        onResult={(result) => {
+          setTestResult(result);
+        }}
+        setPage={setPage}
       />
     );
   }
 
-  if (loading) return <Loading />;
-
   return (
-    <div className="space-y-7">
-      <div>
-        <div className="text-sm font-bold uppercase tracking-wider text-indigo-600">
-          Learning Library
-        </div>
-
-        <h1 className="mt-2 text-3xl font-black">
+    <div>
+      <div className="mb-8">
+        <h1 className="text-3xl font-black text-slate-800">
           📚 Courses
         </h1>
 
-        <p className="mt-2 text-slate-500">
-          Select a course to start your 15-question
-          diagnostic MCQ test.
+        <p className="text-slate-500 mt-2">
+          Select a course and take your diagnostic
+          test.
         </p>
       </div>
 
-      {courses.length === 0 ? (
-        <Card className="p-10 text-center">
-          <div className="text-5xl">
-            📚
-          </div>
+      {error && <ErrorBox message={error} />}
 
-          <h2 className="mt-4 text-xl font-black">
-            No Courses Found
-          </h2>
-
-          <p className="mt-2 text-sm text-slate-500">
-            Courses are not available in the
-            database yet.
-          </p>
-        </Card>
+      {loading ? (
+        <Loading />
       ) : (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {courses.map((course, index) => (
+        <div className="grid md:grid-cols-3 gap-6">
+          {courses.map((course) => (
             <Card
               key={course.id}
-              className="overflow-hidden"
+              className="p-6 hover:shadow-xl transition"
             >
-              <div className="h-36 bg-gradient-to-br from-indigo-500 to-violet-600 p-5 text-white">
-                <div className="flex h-full flex-col justify-between">
-                  <span className="text-4xl">
-                    {index === 0
-                      ? "🐍"
-                      : index === 1
-                      ? "🗄️"
-                      : "☁️"}
-                  </span>
+              <div className="w-16 h-16 rounded-2xl bg-indigo-50 flex items-center justify-center text-4xl mb-5">
+                {course.title
+                  .toLowerCase()
+                  .includes("python")
+                  ? "🐍"
+                  : course.title
+                      .toLowerCase()
+                      .includes("cyber")
+                  ? "🔐"
+                  : course.title
+                      .toLowerCase()
+                      .includes("database")
+                  ? "🗄️"
+                  : "📚"}
+              </div>
 
-                  <span className="text-sm font-bold uppercase">
-                    Course {index + 1}
-                  </span>
+              <h2 className="text-2xl font-black">
+                {course.title}
+              </h2>
+
+              <p className="text-slate-500 mt-2">
+                {course.description}
+              </p>
+
+              <div className="grid grid-cols-2 gap-3 mt-5">
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <div className="text-xl">
+                    📖
+                  </div>
+                  <div className="text-sm text-slate-500">
+                    Topics
+                  </div>
+                  <div className="font-bold">
+                    {course.topic_count || 0}
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <div className="text-xl">
+                    📝
+                  </div>
+                  <div className="text-sm text-slate-500">
+                    MCQs
+                  </div>
+                  <div className="font-bold">
+                    {course.question_count || 0}
+                  </div>
                 </div>
               </div>
 
-              <div className="p-6">
-                <h2 className="text-xl font-black">
-                  {text(
-                    course.title,
-                    "Course"
-                  )}
-                </h2>
-
-                <p className="mt-2 min-h-12 text-sm text-slate-500">
-                  {text(
-                    course.description,
-                    "Test your knowledge and identify weak topics."
-                  )}
-                </p>
-
-                <div className="mt-5 flex gap-2">
-                  <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold">
-                    {course.topic_count || 0}{" "}
-                    Topics
-                  </span>
-
-                  <span className="rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-600">
-                    {course.question_count || 15}{" "}
-                    MCQs
-                  </span>
-                </div>
-
-                <button
+              <div className="mt-6">
+                <Button
                   onClick={() =>
-                    setSelectedCourse(
-                      course.id
-                    )
+                    setSelectedCourse(course)
                   }
-                  className="mt-6 w-full rounded-xl bg-indigo-600 py-3 font-bold text-white hover:bg-indigo-700"
                 >
-                  📝 Start MCQ Test →
-                </button>
+                  Start Diagnostic Test →
+                </Button>
               </div>
             </Card>
           ))}
@@ -1136,322 +1141,230 @@ function CoursesPage({
 }
 
 /* =========================================================
-   MCQ TEST
+   COURSE TEST
 ========================================================= */
 
 function CourseTest({
-  courseId,
   user,
-  setPage,
-  setError,
+  course,
   onBack,
+  onResult,
+  setPage,
 }: {
-  courseId: number;
   user: User;
-  setPage: (page: string) => void;
-  setError: (error: string) => void;
+  course: Course;
   onBack: () => void;
+  onResult: (result: TestResult) => void;
+  setPage: (page: Page) => void;
 }) {
-  const [course, setCourse] =
-    useState<Course | null>(null);
-
   const [questions, setQuestions] =
     useState<Question[]>([]);
-
-  const [topics, setTopics] =
-    useState<Topic[]>([]);
-
-  const [answers, setAnswers] =
-    useState<Record<number, string>>({});
-
-  const [current, setCurrent] =
-    useState(0);
-
-  const [result, setResult] =
-    useState<TestResult | null>(null);
 
   const [loading, setLoading] =
     useState(true);
 
+  const [error, setError] =
+    useState("");
+
+  const [answers, setAnswers] =
+    useState<Record<number, string>>({});
+
   const [submitting, setSubmitting] =
     useState(false);
 
+  const [result, setResult] =
+    useState<TestResult | null>(null);
+
   useEffect(() => {
-    Promise.all([
-      api<Course[]>("/courses"),
-      api<Question[]>(
-        `/courses/${courseId}/questions`
-      ),
-      api<Topic[]>(
-        `/courses/${courseId}/topics`
-      ),
-    ])
-      .then(([courseData, questionData, topicData]) => {
-        setCourse(
-          courseData.find(
-            (c) => c.id === courseId
-          ) || null
-        );
+    async function load() {
+      try {
+        const data =
+          await api<Question[]>(
+            `/courses/${course.id}/questions`
+          );
 
-        setQuestions(
-          questionData.slice(0, 15)
+        // Exactly maximum 15 questions
+        setQuestions(data.slice(0, 15));
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to load questions"
         );
+      } finally {
+        setLoading(false);
+      }
+    }
 
-        setTopics(topicData);
-      })
-      .catch((err) =>
-        setError(err.message)
-      )
-      .finally(() =>
-        setLoading(false)
-      );
-  }, [courseId, setError]);
+    load();
+  }, [course.id]);
 
   async function submitTest() {
-    const unanswered = questions.filter(
-      (q) => !answers[q.id]
-    );
+    if (questions.length === 0) {
+      return;
+    }
 
-    if (unanswered.length > 0) {
+    if (
+      Object.keys(answers).length !==
+      questions.length
+    ) {
       setError(
-        `Please answer all questions. ${unanswered.length} remaining.`
+        "Please answer all questions before submitting."
       );
       return;
     }
 
-    setSubmitting(true);
     setError("");
+    setSubmitting(true);
 
     try {
-      const response = await api<{
-        attempt_id: number;
-      }>("/tests/submit", {
-        method: "POST",
-        body: JSON.stringify({
-          trainee_id: user.id,
-          course_id: courseId,
-          test_type: "pretest",
-          answers: questions.map(
-            (q) => ({
+      const response =
+        await api<{
+          attempt_id: number;
+          score: number;
+          correct: number;
+          total: number;
+          test_type: string;
+          weak_topics: WeakTopic[];
+        }>("/tests/submit", {
+          method: "POST",
+          body: JSON.stringify({
+            trainee_id: user.id,
+            course_id: course.id,
+            test_type: "pretest",
+            answers: questions.map((q) => ({
               question_id: q.id,
               answer: answers[q.id],
-            })
-          ),
-        }),
-      });
+            })),
+          }),
+        });
 
-      const detailed =
+      const fullResult =
         await api<TestResult>(
           `/attempts/${response.attempt_id}/result`
         );
 
-      setResult(detailed);
-    } catch (err: any) {
-      setError(err.message);
+      setResult(fullResult);
+      onResult(fullResult);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Test submission failed"
+      );
     } finally {
       setSubmitting(false);
     }
   }
 
-  if (loading) return <Loading />;
-
   if (result) {
     return (
       <TestResultPage
-        result={result}
         user={user}
+        result={result}
+        course={course}
         setPage={setPage}
-        setError={setError}
         onBack={onBack}
       />
     );
   }
 
-  const question =
-    questions[current];
-
-  if (!question) {
-    return (
-      <Card className="p-10 text-center">
-        <h2 className="text-xl font-black">
-          No MCQs Available
-        </h2>
-
-        <Button
-          onClick={onBack}
-        >
-          Back to Courses
-        </Button>
-      </Card>
-    );
+  if (loading) {
+    return <Loading />;
   }
 
-  const topic =
-    topics.find(
-      (t) => t.id === question.topic_id
-    )?.name || "Topic";
-
   return (
-    <div className="mx-auto max-w-4xl">
+    <div className="max-w-4xl mx-auto">
       <button
         onClick={onBack}
-        className="mb-5 text-sm font-bold text-indigo-600"
+        className="text-indigo-600 font-semibold mb-5"
       >
         ← Back to Courses
       </button>
 
-      <Card className="overflow-hidden">
-        <div className="bg-gradient-to-r from-indigo-600 to-violet-600 p-6 text-white">
-          <div className="text-sm text-indigo-100">
-            Diagnostic MCQ Test
-          </div>
+      <div className="mb-7">
+        <span className="text-sm font-semibold text-indigo-600">
+          Diagnostic Test
+        </span>
 
-          <h1 className="mt-1 text-2xl font-black">
-            {text(
-              course?.title,
-              "Course"
-            )}
-          </h1>
+        <h1 className="text-3xl font-black mt-1">
+          {course.title}
+        </h1>
 
-          <div className="mt-5 h-2 rounded-full bg-white/20">
-            <div
-              className="h-full rounded-full bg-white"
-              style={{
-                width: `${
-                  ((current + 1) /
-                    questions.length) *
-                  100
-                }%`,
-              }}
-            />
-          </div>
+        <p className="text-slate-500 mt-2">
+          Answer all questions honestly. Your weak
+          topics will be identified automatically.
+        </p>
+      </div>
 
-          <div className="mt-2 text-sm">
-            Question {current + 1} of{" "}
-            {questions.length}
-          </div>
-        </div>
+      {error && <ErrorBox message={error} />}
 
-        <div className="p-6 sm:p-8">
-          <span className="rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700">
-            {topic}
-          </span>
-
-          <h2 className="mt-5 text-xl font-black leading-8 sm:text-2xl">
-            {text(
-              question.text,
-              "Question"
-            )}
-          </h2>
-
-          <div className="mt-7 space-y-3">
-            {question.options.map(
-              (option, index) => {
-                const letter =
-                  String.fromCharCode(
-                    65 + index
-                  );
-
-                const selected =
-                  answers[question.id] ===
-                  letter;
-
-                return (
-                  <button
-                    key={index}
-                    onClick={() =>
-                      setAnswers(
-                        (prev) => ({
-                          ...prev,
-                          [question.id]:
-                            letter,
-                        })
-                      )
-                    }
-                    className={`flex w-full items-center gap-4 rounded-xl border p-4 text-left ${
-                      selected
-                        ? "border-indigo-500 bg-indigo-50"
-                        : "border-slate-200 hover:border-indigo-300"
-                    }`}
-                  >
-                    <span
-                      className={`flex h-9 w-9 items-center justify-center rounded-lg font-black ${
-                        selected
-                          ? "bg-indigo-600 text-white"
-                          : "bg-slate-100"
-                      }`}
-                    >
-                      {letter}
-                    </span>
-
-                    <span className="font-medium">
-                      {text(option)}
-                    </span>
-                  </button>
-                );
-              }
-            )}
-          </div>
-
-          <div className="mt-8 flex justify-between gap-3">
-            <Button
-              variant="secondary"
-              disabled={current === 0}
-              onClick={() =>
-                setCurrent(
-                  Math.max(0, current - 1)
-                )
-              }
-            >
-              ← Previous
-            </Button>
-
-            {current <
-            questions.length - 1 ? (
-              <Button
-                onClick={() =>
-                  setCurrent(
-                    Math.min(
-                      questions.length - 1,
-                      current + 1
-                    )
-                  )
-                }
-              >
-                Next →
-              </Button>
-            ) : (
-              <Button
-                onClick={submitTest}
-                disabled={submitting}
-              >
-                {submitting
-                  ? "Submitting..."
-                  : "Submit Test ✓"}
-              </Button>
-            )}
-          </div>
-        </div>
-      </Card>
-
-      <div className="mt-5 flex flex-wrap justify-center gap-2">
-        {questions.map((q, i) => (
-          <button
+      <div className="space-y-5">
+        {questions.map((q, index) => (
+          <Card
             key={q.id}
-            onClick={() =>
-              setCurrent(i)
-            }
-            className={`h-9 w-9 rounded-lg text-sm font-bold ${
-              i === current
-                ? "bg-indigo-600 text-white"
-                : answers[q.id]
-                ? "bg-emerald-100 text-emerald-700"
-                : "border bg-white text-slate-500"
-            }`}
+            className="p-6"
           >
-            {i + 1}
-          </button>
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 shrink-0 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                {index + 1}
+              </div>
+
+              <div className="flex-1">
+                <h3 className="font-bold text-lg">
+                  {q.text}
+                </h3>
+
+                <div className="grid md:grid-cols-2 gap-3 mt-5">
+                  {(
+                    Object.entries(
+                      q.options
+                    ) as [
+                      string,
+                      string
+                    ][]
+                  ).map(
+                    ([key, value]) => (
+                      <button
+                        key={key}
+                        onClick={() =>
+                          setAnswers(
+                            (prev) => ({
+                              ...prev,
+                              [q.id]: key,
+                            })
+                          )
+                        }
+                        className={`text-left p-4 rounded-xl border-2 transition ${
+                          answers[q.id] === key
+                            ? "border-indigo-600 bg-indigo-50"
+                            : "border-slate-200 hover:border-indigo-300"
+                        }`}
+                      >
+                        <span className="font-bold mr-2">
+                          {key}.
+                        </span>
+
+                        {value}
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+            </div>
+          </Card>
         ))}
+      </div>
+
+      <div className="mt-7 flex justify-end">
+        <Button
+          onClick={submitTest}
+          disabled={submitting}
+        >
+          {submitting
+            ? "Analyzing..."
+            : "Submit Test & Analyze →"}
+        </Button>
       </div>
     </div>
   );
@@ -1462,250 +1375,276 @@ function CourseTest({
 ========================================================= */
 
 function TestResultPage({
-  result,
   user,
+  result,
+  course,
   setPage,
-  setError,
   onBack,
 }: {
-  result: TestResult;
   user: User;
-  setPage: (page: string) => void;
-  setError: (error: string) => void;
+  result: TestResult;
+  course: Course;
+  setPage: (page: Page) => void;
   onBack: () => void;
 }) {
-  const [topicId, setTopicId] =
-    useState<number | null>(
-      result.weak_topics?.[0]
-        ?.topic_id || null
-    );
-
-  const wrong =
-    result.questions.filter(
-      (q) => !q.is_correct
-    );
+  const percentage =
+    Number(result.score || 0);
 
   return (
     <div className="space-y-7">
-      <button
-        onClick={onBack}
-        className="text-sm font-bold text-indigo-600"
-      >
-        ← Back to Courses
-      </button>
+      <div className="flex items-center justify-between">
+        <div>
+          <button
+            onClick={onBack}
+            className="text-indigo-600 font-semibold mb-2"
+          >
+            ← Back
+          </button>
 
-      <div>
-        <h1 className="text-3xl font-black">
-          📊 Test Result
-        </h1>
+          <h1 className="text-3xl font-black">
+            Test Result
+          </h1>
 
-        <p className="mt-2 text-slate-500">
-          Your competency analysis.
+          <p className="text-slate-500">
+            {course.title}
+          </p>
+        </div>
+
+        <Button
+          variant="secondary"
+          onClick={() =>
+            setPage("teachers")
+          }
+        >
+          👨‍🏫 Book Teacher Directly
+        </Button>
+      </div>
+
+      <Card className="p-8 text-center">
+        <div className="text-6xl font-black text-indigo-600">
+          {percentage.toFixed(1)}%
+        </div>
+
+        <p className="text-slate-500 mt-2">
+          Your diagnostic score
         </p>
-      </div>
 
-      <div className="grid gap-5 md:grid-cols-3">
-        <Card className="p-6 text-center">
-          <div className="text-sm font-bold uppercase text-slate-400">
-            Score
-          </div>
-
-          <div className="mt-2 text-5xl font-black text-indigo-600">
-            {Math.round(
-              result.score
-            )}
-            %
-          </div>
-        </Card>
-
-        <Card className="p-6 text-center">
-          <div className="text-sm font-bold uppercase text-slate-400">
-            Questions
-          </div>
-
-          <div className="mt-2 text-4xl font-black">
-            {result.questions.length}
-          </div>
-        </Card>
-
-        <Card className="p-6 text-center">
-          <div className="text-sm font-bold uppercase text-slate-400">
-            Weak Topics
-          </div>
-
-          <div className="mt-2 text-4xl font-black text-red-500">
-            {result.weak_topics?.length ||
-              0}
-          </div>
-        </Card>
-      </div>
-
-      <Card className="p-6">
-        <h2 className="text-xl font-black">
-          Topic-wise Analysis
-        </h2>
-
-        <div className="mt-5 space-y-4">
-          {(result.topic_analysis ||
-            []).map((item) => (
-              <div key={item.topic}>
-                <div className="mb-2 flex justify-between">
-                  <span className="font-bold">
-                    {text(
-                      item.topic,
-                      "Topic"
-                    )}
-                  </span>
-
-                  <span className="font-black">
-                    {Math.round(
-                      item.percentage
-                    )}
-                    %
-                  </span>
-                </div>
-
-                <div className="h-3 rounded-full bg-slate-100">
-                  <div
-                    className={`h-full rounded-full ${
-                      item.percentage < 60
-                        ? "bg-red-500"
-                        : item.percentage <
-                          80
-                        ? "bg-amber-500"
-                        : "bg-emerald-500"
-                    }`}
-                    style={{
-                      width: `${Math.min(
-                        100,
-                        Math.max(
-                          0,
-                          item.percentage
-                        )
-                      )}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
+        <div className="mt-5 text-lg">
+          {percentage >= 80
+            ? "🎉 Excellent performance!"
+            : percentage >= 60
+            ? "👍 Good performance, but some topics need work."
+            : "🎯 Let's improve your weak topics!"}
         </div>
       </Card>
 
-      <Card className="p-6">
-        <h2 className="text-xl font-black">
-          ❌ Wrong MCQs
+      {/* TOPIC ANALYSIS */}
+
+      <section>
+        <h2 className="text-2xl font-black mb-4">
+          📊 Topic-wise Analysis
         </h2>
 
-        <div className="mt-5 space-y-5">
-          {wrong.map((q, index) => (
-            <div
-              key={q.question_id}
-              className="rounded-2xl border border-red-100 bg-red-50/50 p-5"
-            >
-              <div className="text-xs font-black uppercase text-red-500">
-                Wrong Question #{index + 1}
-              </div>
+        <div className="grid md:grid-cols-2 gap-4">
+          {result.topic_analysis?.map(
+            (topic) => {
+              const weak =
+                topic.percentage < 60;
 
-              <h3 className="mt-2 font-bold leading-6">
-                {q.question}
-              </h3>
+              return (
+                <Card
+                  key={topic.topic_id}
+                  className="p-5"
+                >
+                  <div className="flex justify-between">
+                    <div className="font-bold">
+                      {topic.topic}
+                    </div>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <div className="rounded-xl bg-red-100 p-4">
-                  <div className="text-xs font-bold text-red-600">
-                    Your Answer
+                    <div
+                      className={`font-black ${
+                        weak
+                          ? "text-red-600"
+                          : "text-green-600"
+                      }`}
+                    >
+                      {topic.percentage.toFixed(
+                        1
+                      )}
+                      %
+                    </div>
                   </div>
 
-                  <div className="mt-1 font-black text-red-800">
-                    {q.your_answer ||
-                      "Not answered"}
+                  <div className="mt-3 h-3 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full ${
+                        weak
+                          ? "bg-red-500"
+                          : "bg-green-500"
+                      }`}
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          topic.percentage
+                        )}%`,
+                      }}
+                    />
                   </div>
-                </div>
 
-                <div className="rounded-xl bg-emerald-100 p-4">
-                  <div className="text-xs font-bold text-emerald-600">
-                    Correct Answer
-                  </div>
-
-                  <div className="mt-1 font-black text-emerald-800">
-                    {q.correct_answer}
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-3 text-xs text-slate-500">
-                Topic:{" "}
-                {text(
-                  q.topic,
-                  "Topic"
-                )}
-              </div>
-            </div>
-          ))}
-
-          {wrong.length === 0 && (
-            <div className="rounded-xl bg-emerald-50 p-5 text-center font-bold text-emerald-700">
-              🎉 All answers are correct!
-            </div>
+                  {weak && (
+                    <div className="mt-3 text-sm text-red-600 font-semibold">
+                      ⚠️ Weak Topic
+                    </div>
+                  )}
+                </Card>
+              );
+            }
           )}
         </div>
-      </Card>
+      </section>
 
-      <Card className="p-6">
-        <h2 className="text-xl font-black">
-          🎯 Recommended Trainers
+      {/* WEAK TOPICS */}
+
+      {result.weak_topics?.length > 0 && (
+        <section>
+          <h2 className="text-2xl font-black mb-4">
+            🎯 Your Weak Topics
+          </h2>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            {result.weak_topics.map(
+              (topic) => (
+                <Card
+                  key={topic.topic_id}
+                  className="p-5 border-red-200 bg-red-50"
+                >
+                  <div className="flex justify-between">
+                    <div>
+                      <div className="font-black text-red-800">
+                        {topic.topic}
+                      </div>
+
+                      <div className="text-sm text-red-600 mt-1">
+                        You scored{" "}
+                        {topic.percentage.toFixed(
+                          1
+                        )}
+                        %
+                      </div>
+                    </div>
+
+                    <span className="text-2xl">
+                      ⚠️
+                    </span>
+                  </div>
+                </Card>
+              )
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* TRAINERS */}
+
+      {result.weak_topics?.length > 0 ? (
+        <section>
+          <h2 className="text-2xl font-black mb-2">
+            👨‍🏫 Recommended Trainers
+          </h2>
+
+          <p className="text-slate-500 mb-5">
+            Trainers are automatically recommended
+            based on your weak MCQ topics.
+          </p>
+
+          <div className="space-y-6">
+            {result.weak_topics.map(
+              (topic) => (
+                <RecommendedTrainers
+                  key={topic.topic_id}
+                  user={user}
+                  topic={topic}
+                />
+              )
+            )}
+          </div>
+        </section>
+      ) : (
+        <Card className="p-7 bg-green-50 border-green-200">
+          <div className="text-3xl">
+            🎉
+          </div>
+
+          <h3 className="text-xl font-black text-green-800 mt-2">
+            No weak topics detected!
+          </h3>
+
+          <p className="text-green-700 mt-1">
+            You can still book a teacher directly
+            whenever you need help.
+          </p>
+
+          <div className="mt-4">
+            <Button
+              onClick={() =>
+                setPage("teachers")
+              }
+            >
+              Find a Teacher
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {/* WRONG QUESTIONS */}
+
+      <section>
+        <h2 className="text-2xl font-black mb-4">
+          ❌ Question Review
         </h2>
 
-        <p className="mt-1 text-sm text-slate-500">
-          Trainers are automatically recommended
-          according to your weak topics.
-        </p>
+        <div className="space-y-4">
+          {result.questions
+            ?.filter(
+              (q) => !q.is_correct
+            )
+            .map((q, index) => (
+              <Card
+                key={q.question_id}
+                className="p-6 border-red-200"
+              >
+                <div className="flex gap-3">
+                  <div className="w-8 h-8 rounded-full bg-red-100 text-red-700 flex items-center justify-center font-bold shrink-0">
+                    {index + 1}
+                  </div>
 
-        {result.weak_topics?.length ===
-        0 ? (
-          <div className="mt-5 rounded-xl bg-emerald-50 p-5 text-emerald-700">
-            Great! You don't have any weak
-            topic.
-          </div>
-        ) : (
-          <>
-            <div className="mt-5 flex flex-wrap gap-2">
-              {result.weak_topics.map(
-                (topic) => (
-                  <button
-                    key={topic.topic_id}
-                    onClick={() =>
-                      setTopicId(
-                        topic.topic_id
-                      )
-                    }
-                    className={`rounded-xl px-4 py-2 text-sm font-bold ${
-                      topicId ===
-                      topic.topic_id
-                        ? "bg-indigo-600 text-white"
-                        : "bg-red-50 text-red-600"
-                    }`}
-                  >
-                    {topic.topic}{" "}
-                    {Math.round(
-                      topic.percentage
-                    )}
-                    %
-                  </button>
-                )
-              )}
-            </div>
+                  <div>
+                    <div className="font-bold text-lg">
+                      {q.question}
+                    </div>
 
-            {topicId && (
-              <RecommendedTrainers
-                topicId={topicId}
-                user={user}
-                setError={setError}
-              />
-            )}
-          </>
-        )}
-      </Card>
+                    <div className="mt-4 space-y-2 text-sm">
+                      <div className="p-3 rounded-lg bg-red-50 text-red-700">
+                        <b>Your answer:</b>{" "}
+                        {q.your_answer || "Not answered"}
+                      </div>
+
+                      <div className="p-3 rounded-lg bg-green-50 text-green-700">
+                        <b>Correct answer:</b>{" "}
+                        {q.correct_answer}
+                      </div>
+
+                      <div className="text-slate-500">
+                        Topic:{" "}
+                        <b>{q.topic}</b>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -1715,204 +1654,203 @@ function TestResultPage({
 ========================================================= */
 
 function RecommendedTrainers({
-  topicId,
   user,
-  setError,
+  topic,
 }: {
-  topicId: number;
   user: User;
-  setError: (error: string) => void;
+  topic: WeakTopic;
 }) {
   const [trainers, setTrainers] =
     useState<Trainer[]>([]);
 
+  const [selectedTrainer, setSelectedTrainer] =
+    useState<Trainer | null>(null);
+
   const [slots, setSlots] =
-    useState<Record<number, Slot[]>>(
-      {}
-    );
+    useState<Slot[]>([]);
 
   const [loading, setLoading] =
     useState(true);
 
-  const [booking, setBooking] =
-    useState<number | null>(null);
+  const [message, setMessage] =
+    useState("");
 
   useEffect(() => {
-    setLoading(true);
-
     api<Trainer[]>(
-      `/trainers/recommended/${topicId}`
+      `/trainers/recommended/${topic.topic_id}`
     )
-      .then(async (trainerData) => {
-        setTrainers(trainerData);
+      .then(setTrainers)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [topic.topic_id]);
 
-        const allSlots =
-          await Promise.all(
-            trainerData.map(
-              async (trainer) => {
-                try {
-                  const data =
-                    await api<Slot[]>(
-                      `/trainers/${trainer.id}/slots`
-                    );
-
-                  return [
-                    trainer.id,
-                    data,
-                  ] as const;
-                } catch {
-                  return [
-                    trainer.id,
-                    [],
-                  ] as const;
-                }
-              }
-            )
-          );
-
-        setSlots(
-          Object.fromEntries(
-            allSlots
-          )
-        );
-      })
-      .catch((err) =>
-        setError(err.message)
-      )
-      .finally(() =>
-        setLoading(false)
-      );
-  }, [topicId, setError]);
-
-  async function book(
-    trainerId: number,
-    slotId: number
+  async function loadSlots(
+    trainer: Trainer
   ) {
-    setBooking(slotId);
+    setSelectedTrainer(trainer);
+    setMessage("");
+
+    try {
+      const data = await api<Slot[]>(
+        `/trainers/${trainer.id}/slots`
+      );
+
+      setSlots(
+        data.filter((slot) => slot.available)
+      );
+    } catch (err) {
+      setMessage(
+        err instanceof Error
+          ? err.message
+          : "Could not load slots"
+      );
+    }
+  }
+
+  async function bookSlot(slot: Slot) {
+    if (!selectedTrainer) return;
 
     try {
       await api("/bookings", {
         method: "POST",
         body: JSON.stringify({
           trainee_id: user.id,
-          trainer_id: trainerId,
-          slot_id: slotId,
-          topic_id: topicId,
+          trainer_id: selectedTrainer.id,
+          slot_id: slot.id,
+          topic_id: topic.topic_id,
         }),
       });
 
-      alert(
-        "Lecture booked successfully!"
+      setMessage(
+        "✅ Lecture booked successfully!"
       );
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setBooking(null);
+
+      setSlots((prev) =>
+        prev.filter(
+          (item) => item.id !== slot.id
+        )
+      );
+    } catch (err) {
+      setMessage(
+        err instanceof Error
+          ? err.message
+          : "Booking failed"
+      );
     }
   }
 
-  if (loading) return <Loading />;
-
-  if (!trainers.length) {
-    return (
-      <div className="mt-5 rounded-xl bg-amber-50 p-5 text-amber-700">
-        No trainer is currently available
-        for this topic.
-      </div>
-    );
-  }
-
   return (
-    <div className="mt-6 grid gap-5 md:grid-cols-2">
-      {trainers.map((trainer) => {
-        const availableSlots =
-          (slots[trainer.id] ||
-            []).filter(
-              (slot) => slot.available
-            );
+    <Card className="p-6">
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <div className="text-sm font-semibold text-red-600">
+            Weak Topic
+          </div>
 
-        return (
-          <Card
-            key={trainer.id}
-            className="p-5"
-          >
-            <div className="flex gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-100 font-black text-indigo-700">
-                {initials(
-                  trainer.name
-                )}
-              </div>
+          <h3 className="text-xl font-black">
+            {topic.topic}
+          </h3>
 
-              <div>
-                <h3 className="font-black">
-                  {text(
-                    trainer.name,
-                    "Trainer"
-                  )}
-                </h3>
+          <p className="text-sm text-slate-500">
+            Score:{" "}
+            {topic.percentage.toFixed(1)}%
+          </p>
+        </div>
 
-                <p className="text-sm text-slate-500">
-                  {text(
-                    trainer.email
-                  )}
-                </p>
+        <span className="text-3xl">
+          🎯
+        </span>
+      </div>
 
-                {trainer.bio && (
-                  <p className="mt-2 text-sm text-slate-500">
+      {message && (
+        <div className="bg-green-50 text-green-700 border border-green-200 rounded-xl p-3 mb-4">
+          {message}
+        </div>
+      )}
+
+      {loading ? (
+        <Loading />
+      ) : trainers.length === 0 ? (
+        <div className="text-slate-500">
+          No trainer currently available for this
+          topic.
+        </div>
+      ) : (
+        <div className="grid md:grid-cols-2 gap-4">
+          {trainers.map((trainer) => (
+            <div
+              key={trainer.id}
+              className="border border-slate-200 rounded-xl p-5"
+            >
+              <div className="flex gap-4">
+                <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                  {initials(trainer.name)}
+                </div>
+
+                <div>
+                  <h4 className="font-black">
+                    {trainer.name}
+                  </h4>
+
+                  <p className="text-sm text-slate-500">
                     {trainer.bio}
                   </p>
-                )}
+
+                  <p className="text-sm text-green-600 mt-2">
+                    🟢{" "}
+                    {trainer.available_slots ||
+                      0} slots available
+                  </p>
+                </div>
               </div>
-            </div>
 
-            <div className="mt-5">
-              <div className="mb-3 font-black">
-                Available Slots
+              <div className="mt-4">
+                <Button
+                  onClick={() =>
+                    loadSlots(trainer)
+                  }
+                >
+                  View Slots
+                </Button>
               </div>
 
-              {availableSlots.map(
-                (slot) => (
-                  <button
-                    key={slot.id}
-                    disabled={
-                      booking === slot.id
-                    }
-                    onClick={() =>
-                      book(
-                        trainer.id,
-                        slot.id
-                      )
-                    }
-                    className="mb-2 flex w-full justify-between rounded-xl border border-slate-200 p-3 hover:border-indigo-400 hover:bg-indigo-50"
-                  >
-                    <span className="font-semibold">
-                      🕐{" "}
-                      {slot.start_time}{" "}
-                      -{" "}
-                      {slot.end_time}
-                    </span>
+              {selectedTrainer?.id ===
+                trainer.id && (
+                <div className="mt-4 space-y-2">
+                  {slots.length === 0 ? (
+                    <p className="text-sm text-slate-500">
+                      No available slots.
+                    </p>
+                  ) : (
+                    slots.map((slot) => (
+                      <div
+                        key={slot.id}
+                        className="flex items-center justify-between p-3 rounded-lg bg-slate-50"
+                      >
+                        <div className="text-sm">
+                          🕐{" "}
+                          {slot.start_time} -{" "}
+                          {slot.end_time}
+                        </div>
 
-                    <span className="font-bold text-indigo-600">
-                      {booking ===
-                      slot.id
-                        ? "Booking..."
-                        : "Book →"}
-                    </span>
-                  </button>
-                )
-              )}
-
-              {availableSlots.length ===
-                0 && (
-                <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">
-                  No available slots.
+                        <button
+                          onClick={() =>
+                            bookSlot(slot)
+                          }
+                          className="text-sm font-bold text-indigo-600"
+                        >
+                          Book
+                        </button>
+                      </div>
+                    ))
+                  )}
                 </div>
               )}
             </div>
-          </Card>
-        );
-      })}
-    </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -1922,287 +1860,273 @@ function RecommendedTrainers({
 
 function TeachersPage({
   user,
-  setError,
 }: {
   user: User;
-  setError: (error: string) => void;
 }) {
   const [trainers, setTrainers] =
     useState<Trainer[]>([]);
 
-  const [selected, setSelected] =
+  const [selectedTrainer, setSelectedTrainer] =
     useState<Trainer | null>(null);
 
   const [topics, setTopics] =
     useState<Topic[]>([]);
 
+  const [selectedTopic, setSelectedTopic] =
+    useState<Topic | null>(null);
+
   const [slots, setSlots] =
     useState<Slot[]>([]);
-
-  const [topicId, setTopicId] =
-    useState<number | null>(null);
 
   const [loading, setLoading] =
     useState(true);
 
-  const [booking, setBooking] =
-    useState<number | null>(null);
+  const [message, setMessage] =
+    useState("");
 
   useEffect(() => {
     api<Trainer[]>("/trainers")
       .then(setTrainers)
-      .catch((err) =>
-        setError(err.message)
-      )
-      .finally(() =>
-        setLoading(false)
-      );
-  }, [setError]);
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
 
-  async function selectTeacher(
+  async function selectTrainer(
     trainer: Trainer
   ) {
-    setSelected(trainer);
+    setSelectedTrainer(trainer);
+    setSelectedTopic(null);
+    setSlots([]);
+    setMessage("");
 
     try {
-      const [topicData, slotData] =
-        await Promise.all([
-          api<Topic[]>(
-            `/trainers/${trainer.id}/topics`
-          ),
-          api<Slot[]>(
-            `/trainers/${trainer.id}/slots`
-          ),
-        ]);
+      const data = await api<Topic[]>(
+        `/trainers/${trainer.id}/topics`
+      );
 
-      setTopics(topicData);
-      setSlots(slotData);
-    } catch (err: any) {
-      setError(err.message);
+      setTopics(data);
+    } catch (err) {
+      setMessage(
+        err instanceof Error
+          ? err.message
+          : "Unable to load topics"
+      );
     }
   }
 
-  async function book(
-    slotId: number
+  async function selectTopic(
+    topic: Topic
   ) {
-    if (!selected || !topicId) {
-      setError(
-        "Please select a topic first."
+    setSelectedTopic(topic);
+    setMessage("");
+
+    if (!selectedTrainer) return;
+
+    try {
+      const data = await api<Slot[]>(
+        `/trainers/${selectedTrainer.id}/slots`
       );
+
+      setSlots(
+        data.filter((slot) => slot.available)
+      );
+    } catch (err) {
+      setMessage(
+        err instanceof Error
+          ? err.message
+          : "Unable to load slots"
+      );
+    }
+  }
+
+  async function book(slot: Slot) {
+    if (
+      !selectedTrainer ||
+      !selectedTopic
+    ) {
       return;
     }
-
-    setBooking(slotId);
 
     try {
       await api("/bookings", {
         method: "POST",
         body: JSON.stringify({
           trainee_id: user.id,
-          trainer_id: selected.id,
-          slot_id: slotId,
-          topic_id: topicId,
+          trainer_id: selectedTrainer.id,
+          slot_id: slot.id,
+          topic_id: selectedTopic.id,
         }),
       });
 
-      alert(
-        "Lecture booked successfully!"
+      setMessage(
+        "✅ Lecture booked successfully!"
       );
 
-      setSlots(
-        await api<Slot[]>(
-          `/trainers/${selected.id}/slots`
+      setSlots((prev) =>
+        prev.filter(
+          (item) => item.id !== slot.id
         )
       );
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setBooking(null);
+    } catch (err) {
+      setMessage(
+        err instanceof Error
+          ? err.message
+          : "Booking failed"
+      );
     }
   }
 
-  if (loading) return <Loading />;
-
-  if (selected) {
-    return (
-      <div className="space-y-6">
-        <button
-          onClick={() =>
-            setSelected(null)
-          }
-          className="text-sm font-bold text-indigo-600"
-        >
-          ← Back to Teachers
-        </button>
-
-        <Card className="p-6">
-          <div className="flex items-center gap-4">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-indigo-100 text-xl font-black text-indigo-700">
-              {initials(
-                selected.name
-              )}
-            </div>
-
-            <div>
-              <h1 className="text-2xl font-black">
-                {text(
-                  selected.name,
-                  "Teacher"
-                )}
-              </h1>
-
-              <p className="text-sm text-slate-500">
-                {text(
-                  selected.email
-                )}
-              </p>
-            </div>
-          </div>
-        </Card>
-
-        <div className="grid gap-6 lg:grid-cols-2">
-          <Card className="p-6">
-            <h2 className="text-lg font-black">
-              1. Select Topic
-            </h2>
-
-            <p className="mt-1 text-sm text-slate-500">
-              No test is required for direct
-              teacher booking.
-            </p>
-
-            <div className="mt-5 space-y-2">
-              {topics.map((topic) => (
-                <button
-                  key={topic.id}
-                  onClick={() =>
-                    setTopicId(
-                      topic.id
-                    )
-                  }
-                  className={`w-full rounded-xl border p-4 text-left font-bold ${
-                    topicId ===
-                    topic.id
-                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
-                      : "border-slate-200"
-                  }`}
-                >
-                  📘 {topic.name}
-                </button>
-              ))}
-            </div>
-          </Card>
-
-          <Card className="p-6">
-            <h2 className="text-lg font-black">
-              2. Available Slots
-            </h2>
-
-            <div className="mt-5 space-y-3">
-              {slots
-                .filter(
-                  (slot) =>
-                    slot.available
-                )
-                .map((slot) => (
-                  <button
-                    key={slot.id}
-                    disabled={
-                      booking ===
-                      slot.id
-                    }
-                    onClick={() =>
-                      book(slot.id)
-                    }
-                    className="flex w-full justify-between rounded-xl border border-slate-200 p-4 hover:border-indigo-400 hover:bg-indigo-50"
-                  >
-                    <span className="font-bold">
-                      🕐{" "}
-                      {slot.start_time}{" "}
-                      -{" "}
-                      {slot.end_time}
-                    </span>
-
-                    <span className="font-bold text-indigo-600">
-                      {booking ===
-                      slot.id
-                        ? "Booking..."
-                        : "Book"}
-                    </span>
-                  </button>
-                ))}
-            </div>
-          </Card>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-7">
-      <div>
-        <div className="text-sm font-bold uppercase tracking-wider text-indigo-600">
-          Direct Learning
-        </div>
-
-        <h1 className="mt-2 text-3xl font-black">
+    <div>
+      <div className="mb-8">
+        <h1 className="text-3xl font-black">
           👨‍🏫 Teachers
         </h1>
 
-        <p className="mt-2 text-slate-500">
-          Directly select a teacher, topic and
-          lecture slot.
+        <p className="text-slate-500 mt-2">
+          You can book a lecture directly without
+          taking any test.
         </p>
       </div>
 
-      <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-        {trainers.map((trainer) => (
-          <Card
-            key={trainer.id}
-            className="p-6"
-          >
-            <div className="flex items-center gap-4">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-indigo-100 font-black text-indigo-700">
-                {initials(
-                  trainer.name
-                )}
+      {message && (
+        <div className="bg-green-50 text-green-700 border border-green-200 rounded-xl p-4 mb-5">
+          {message}
+        </div>
+      )}
+
+      {loading ? (
+        <Loading />
+      ) : (
+        <div className="grid lg:grid-cols-3 gap-6">
+          {/* TRAINERS */}
+
+          <div className="space-y-4">
+            <h2 className="font-black text-xl">
+              1. Select Teacher
+            </h2>
+
+            {trainers.map((trainer) => (
+              <Card
+                key={trainer.id}
+                className={`p-5 cursor-pointer transition ${
+                  selectedTrainer?.id ===
+                  trainer.id
+                    ? "border-indigo-600 ring-2 ring-indigo-100"
+                    : "hover:shadow-md"
+                }`}
+                onClick={() =>
+                  selectTrainer(trainer)
+                }
+              >
+                <div className="flex gap-3">
+                  <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                    {initials(trainer.name)}
+                  </div>
+
+                  <div>
+                    <h3 className="font-black">
+                      {trainer.name}
+                    </h3>
+
+                    <p className="text-sm text-slate-500">
+                      {trainer.bio}
+                    </p>
+
+                    <p className="text-xs text-green-600 mt-1">
+                      🟢{" "}
+                      {trainer.available_slots ||
+                        0} slots
+                    </p>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+
+          {/* TOPICS */}
+
+          <div>
+            <h2 className="font-black text-xl mb-4">
+              2. Select Topic
+            </h2>
+
+            {!selectedTrainer ? (
+              <Card className="p-6 text-slate-500">
+                Select a teacher first.
+              </Card>
+            ) : topics.length === 0 ? (
+              <Card className="p-6 text-slate-500">
+                No topics found.
+              </Card>
+            ) : (
+              <div className="space-y-3">
+                {topics.map((topic) => (
+                  <button
+                    key={topic.id}
+                    onClick={() =>
+                      selectTopic(topic)
+                    }
+                    className={`w-full text-left p-4 rounded-xl border-2 ${
+                      selectedTopic?.id ===
+                      topic.id
+                        ? "border-indigo-600 bg-indigo-50"
+                        : "border-slate-200 hover:border-indigo-300"
+                    }`}
+                  >
+                    📖 {topic.name}
+                  </button>
+                ))}
               </div>
-
-              <div>
-                <h2 className="font-black">
-                  {text(
-                    trainer.name,
-                    "Teacher"
-                  )}
-                </h2>
-
-                <p className="text-xs text-slate-500">
-                  {text(
-                    trainer.email
-                  )}
-                </p>
-              </div>
-            </div>
-
-            {trainer.bio && (
-              <p className="mt-4 text-sm text-slate-500">
-                {trainer.bio}
-              </p>
             )}
+          </div>
 
-            <button
-              onClick={() =>
-                selectTeacher(
-                  trainer
-                )
-              }
-              className="mt-5 w-full rounded-xl bg-indigo-600 py-3 font-bold text-white"
-            >
-              View Topics & Slots →
-            </button>
-          </Card>
-        ))}
-      </div>
+          {/* SLOTS */}
+
+          <div>
+            <h2 className="font-black text-xl mb-4">
+              3. Book Slot
+            </h2>
+
+            {!selectedTopic ? (
+              <Card className="p-6 text-slate-500">
+                Select a topic first.
+              </Card>
+            ) : slots.length === 0 ? (
+              <Card className="p-6 text-slate-500">
+                No available slots.
+              </Card>
+            ) : (
+              <div className="space-y-3">
+                {slots.map((slot) => (
+                  <Card
+                    key={slot.id}
+                    className="p-4"
+                  >
+                    <div className="font-bold">
+                      🕐 {slot.start_time}
+                    </div>
+
+                    <div className="text-sm text-slate-500">
+                      to {slot.end_time}
+                    </div>
+
+                    <div className="mt-3">
+                      <Button
+                        onClick={() =>
+                          book(slot)
+                        }
+                      >
+                        Book Lecture
+                      </Button>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2213,10 +2137,8 @@ function TeachersPage({
 
 function BookingsPage({
   user,
-  setError,
 }: {
   user: User;
-  setError: (error: string) => void;
 }) {
   const [bookings, setBookings] =
     useState<Booking[]>([]);
@@ -2224,15 +2146,23 @@ function BookingsPage({
   const [loading, setLoading] =
     useState(true);
 
+  const [error, setError] =
+    useState("");
+
   async function load() {
     try {
-      setBookings(
+      const data =
         await api<Booking[]>(
           `/bookings/trainee/${user.id}`
-        )
+        );
+
+      setBookings(data);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to load bookings"
       );
-    } catch (err: any) {
-      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -2242,9 +2172,11 @@ function BookingsPage({
     load();
   }, [user.id]);
 
-  async function complete(
-    lectureId: number
+  async function completeLecture(
+    lectureId?: number
   ) {
+    if (!lectureId) return;
+
     try {
       await api(
         `/lectures/${lectureId}/complete`,
@@ -2253,73 +2185,72 @@ function BookingsPage({
         }
       );
 
-      await load();
-    } catch (err: any) {
-      setError(err.message);
+      load();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to complete lecture"
+      );
     }
   }
 
-  if (loading) return <Loading />;
-
   return (
-    <div className="space-y-7">
-      <div>
+    <div>
+      <div className="mb-8">
         <h1 className="text-3xl font-black">
           📅 My Bookings
         </h1>
 
-        <p className="mt-2 text-slate-500">
-          Your trainer lectures.
+        <p className="text-slate-500 mt-2">
+          Your scheduled trainer lectures.
         </p>
       </div>
 
-      {bookings.length === 0 ? (
-        <Card className="p-10 text-center">
+      {error && <ErrorBox message={error} />}
+
+      {loading ? (
+        <Loading />
+      ) : bookings.length === 0 ? (
+        <Card className="p-8 text-center">
           <div className="text-5xl">
             📅
           </div>
 
-          <h2 className="mt-3 text-xl font-black">
+          <h3 className="font-black text-xl mt-3">
             No bookings yet
-          </h2>
+          </h3>
+
+          <p className="text-slate-500">
+            Book a trainer lecture to get started.
+          </p>
         </Card>
       ) : (
         <div className="space-y-4">
           {bookings.map((booking) => (
             <Card
               key={booking.booking_id}
-              className="p-5"
+              className="p-6"
             >
-              <div className="flex flex-wrap justify-between gap-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                  <div className="text-xs font-bold uppercase text-indigo-600">
-                    {text(
-                      booking.topic,
-                      "Topic"
-                    )}
+                  <div className="text-sm text-indigo-600 font-semibold">
+                    {booking.topic}
                   </div>
 
-                  <h2 className="mt-1 text-lg font-black">
-                    {text(
-                      booking.trainer,
-                      "Trainer"
-                    )}
-                  </h2>
+                  <h3 className="text-xl font-black">
+                    {booking.trainer}
+                  </h3>
 
-                  <p className="mt-2 text-sm text-slate-500">
-                    🕐{" "}
-                    {booking.start_time}{" "}
-                    -{" "}
+                  <p className="text-slate-500 mt-1">
+                    🕐 {booking.start_time} -{" "}
                     {booking.end_time}
                   </p>
                 </div>
 
                 <div>
-                  <span className="rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700">
-                    {text(
-                      booking.lecture_status,
-                      booking.status
-                    )}
+                  <span className="px-3 py-1 rounded-full bg-green-100 text-green-700 text-sm font-semibold">
+                    {booking.status}
                   </span>
 
                   {booking.lecture_id &&
@@ -2328,12 +2259,12 @@ function BookingsPage({
                       <div className="mt-3">
                         <Button
                           onClick={() =>
-                            complete(
-                              booking.lecture_id!
+                            completeLecture(
+                              booking.lecture_id
                             )
                           }
                         >
-                          Complete Lecture
+                          Mark Lecture Complete
                         </Button>
                       </div>
                     )}
@@ -2353,12 +2284,10 @@ function BookingsPage({
 
 function ProgressPage({
   user,
-  setError,
 }: {
   user: User;
-  setError: (error: string) => void;
 }) {
-  const [progress, setProgress] =
+  const [data, setData] =
     useState<any[]>([]);
 
   const [loading, setLoading] =
@@ -2368,99 +2297,86 @@ function ProgressPage({
     api<any[]>(
       `/progress/${user.id}`
     )
-      .then(setProgress)
-      .catch((err) =>
-        setError(err.message)
-      )
-      .finally(() =>
-        setLoading(false)
-      );
-  }, [user.id, setError]);
+      .then(setData)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [user.id]);
 
-  if (loading) return <Loading />;
+  if (loading) {
+    return <Loading />;
+  }
 
   return (
-    <div className="space-y-7">
-      <div>
+    <div>
+      <div className="mb-8">
         <h1 className="text-3xl font-black">
-          📊 My Progress
+          📈 My Progress
         </h1>
 
-        <p className="mt-2 text-slate-500">
-          Track your test performance.
+        <p className="text-slate-500 mt-2">
+          Track your tests and topic performance.
         </p>
       </div>
 
-      {progress.length === 0 ? (
-        <Card className="p-10 text-center">
+      {data.length === 0 ? (
+        <Card className="p-8 text-center">
           <div className="text-5xl">
-            📈
+            📊
           </div>
 
-          <h2 className="mt-3 text-xl font-black">
+          <h3 className="text-xl font-black mt-3">
             No progress yet
-          </h2>
+          </h3>
 
-          <p className="mt-2 text-sm text-slate-500">
-            Take your first MCQ test.
+          <p className="text-slate-500">
+            Take a course test to start tracking
+            your progress.
           </p>
         </Card>
       ) : (
         <div className="space-y-5">
-          {progress.map((attempt) => (
+          {data.map((item) => (
             <Card
-              key={attempt.attempt_id}
+              key={item.attempt_id}
               className="p-6"
             >
-              <div className="flex justify-between gap-3">
+              <div className="flex justify-between items-center">
                 <div>
-                  <div className="text-xs font-bold uppercase text-indigo-600">
-                    {text(
-                      attempt.test_type
-                    )}
-                  </div>
+                  <h3 className="text-xl font-black">
+                    {item.course}
+                  </h3>
 
-                  <h2 className="mt-1 text-xl font-black">
-                    {text(
-                      attempt.course,
-                      "Course"
-                    )}
-                  </h2>
+                  <p className="text-sm text-slate-500">
+                    {item.test_type}
+                  </p>
                 </div>
 
                 <div className="text-3xl font-black text-indigo-600">
-                  {Math.round(
-                    Number(
-                      attempt.score || 0
-                    )
-                  )}
+                  {Number(
+                    item.score || 0
+                  ).toFixed(1)}
                   %
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {(attempt.topics ||
-                  []).map(
+              <div className="grid md:grid-cols-2 gap-3 mt-5">
+                {item.topics?.map(
                   (topic: any) => (
                     <div
                       key={topic.topic}
-                      className="rounded-xl bg-slate-50 p-4"
+                      className="bg-slate-50 p-4 rounded-xl"
                     >
-                      <div className="font-bold">
-                        {text(
-                          topic.topic,
-                          "Topic"
-                        )}
-                      </div>
+                      <div className="flex justify-between">
+                        <span className="font-semibold">
+                          {topic.topic}
+                        </span>
 
-                      <div className="mt-1 text-xl font-black">
-                        {Math.round(
-                          Number(
-                            topic.percentage ||
-                              0
-                          )
-                        )}
-                        %
+                        <span className="font-bold">
+                          {Number(
+                            topic.percentage
+                          ).toFixed(1)}
+                          %
+                        </span>
                       </div>
                     </div>
                   )
@@ -2481,23 +2397,25 @@ function ProgressPage({
 function ProfilePage({
   user,
   setUser,
-  setError,
 }: {
   user: User;
   setUser: (user: User) => void;
-  setError: (error: string) => void;
 }) {
   const [name, setName] =
-    useState(text(user.name));
+    useState(user.name);
 
   const [bio, setBio] =
-    useState(text(user.bio));
+    useState(user.bio || "");
 
-  const [saving, setSaving] =
-    useState(false);
+  const [message, setMessage] =
+    useState("");
+
+  const [error, setError] =
+    useState("");
 
   async function save() {
-    setSaving(true);
+    setMessage("");
+    setError("");
 
     try {
       const updated =
@@ -2519,72 +2437,76 @@ function ProfilePage({
         JSON.stringify(updated)
       );
 
-      alert(
-        "Profile updated successfully!"
+      setMessage(
+        "Profile updated successfully."
       );
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Update failed"
+      );
     }
   }
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <h1 className="text-3xl font-black">
+    <div className="max-w-2xl">
+      <h1 className="text-3xl font-black mb-7">
         👤 Profile
       </h1>
 
-      <Card className="mt-6 p-6">
-        <div className="mb-6 flex items-center gap-4">
-          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-indigo-100 text-2xl font-black text-indigo-700">
+      {message && (
+        <div className="bg-green-50 text-green-700 border border-green-200 rounded-xl p-4 mb-5">
+          {message}
+        </div>
+      )}
+
+      {error && <ErrorBox message={error} />}
+
+      <Card className="p-7 space-y-5">
+        <div className="flex items-center gap-4 mb-5">
+          <div className="w-16 h-16 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xl font-black">
             {initials(user.name)}
           </div>
 
           <div>
-            <h2 className="text-xl font-black">
-              {text(
-                user.name,
-                "User"
-              )}
+            <h2 className="font-black text-xl">
+              {user.name}
             </h2>
 
-            <p className="text-sm text-slate-500">
-              {text(user.email)}
+            <p className="text-slate-500">
+              {user.email}
+            </p>
+
+            <p className="text-sm text-indigo-600 capitalize">
+              {user.role}
             </p>
           </div>
         </div>
 
-        <div className="space-y-5">
-          <Input
-            label="Name"
-            value={name}
-            onChange={setName}
+        <Input
+          label="Name"
+          value={name}
+          onChange={setName}
+        />
+
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-2">
+            Bio
+          </label>
+
+          <textarea
+            value={bio}
+            onChange={(e) =>
+              setBio(e.target.value)
+            }
+            className="w-full px-4 py-3 rounded-xl border border-slate-300 min-h-32"
           />
-
-          <div>
-            <label className="mb-1.5 block text-sm font-semibold">
-              Bio
-            </label>
-
-            <textarea
-              value={bio}
-              onChange={(e) =>
-                setBio(e.target.value)
-              }
-              className="min-h-28 w-full rounded-xl border border-slate-200 px-4 py-3"
-            />
-          </div>
-
-          <Button
-            onClick={save}
-            disabled={saving}
-          >
-            {saving
-              ? "Saving..."
-              : "Save Profile"}
-          </Button>
         </div>
+
+        <Button onClick={save}>
+          Save Profile
+        </Button>
       </Card>
     </div>
   );
@@ -2596,26 +2518,24 @@ function ProfilePage({
 
 function SettingsPage({
   user,
-  setError,
 }: {
   user: User;
-  setError: (error: string) => void;
 }) {
-  const [current, setCurrent] =
+  const [currentPassword, setCurrentPassword] =
     useState("");
 
   const [newPassword, setNewPassword] =
     useState("");
 
-  const [saving, setSaving] =
-    useState(false);
+  const [message, setMessage] =
+    useState("");
 
-  async function changePassword(
-    e: React.FormEvent
-  ) {
-    e.preventDefault();
+  const [error, setError] =
+    useState("");
 
-    setSaving(true);
+  async function changePassword() {
+    setMessage("");
+    setError("");
 
     try {
       await api(
@@ -2623,46 +2543,53 @@ function SettingsPage({
         {
           method: "PUT",
           body: JSON.stringify({
-            current_password: current,
+            current_password:
+              currentPassword,
             new_password: newPassword,
           }),
         }
       );
 
-      setCurrent("");
+      setCurrentPassword("");
       setNewPassword("");
 
-      alert(
-        "Password changed successfully!"
+      setMessage(
+        "Password changed successfully."
       );
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Password change failed"
+      );
     }
   }
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <h1 className="text-3xl font-black">
+    <div className="max-w-2xl">
+      <h1 className="text-3xl font-black mb-7">
         ⚙️ Settings
       </h1>
 
-      <Card className="mt-6 p-6">
-        <h2 className="text-xl font-black">
+      {message && (
+        <div className="bg-green-50 text-green-700 border border-green-200 rounded-xl p-4 mb-5">
+          {message}
+        </div>
+      )}
+
+      {error && <ErrorBox message={error} />}
+
+      <Card className="p-7">
+        <h2 className="text-xl font-black mb-5">
           Change Password
         </h2>
 
-        <form
-          onSubmit={changePassword}
-          className="mt-6 space-y-5"
-        >
+        <div className="space-y-4">
           <Input
             label="Current Password"
             type="password"
-            value={current}
-            onChange={setCurrent}
-            required
+            value={currentPassword}
+            onChange={setCurrentPassword}
           />
 
           <Input
@@ -2670,18 +2597,14 @@ function SettingsPage({
             type="password"
             value={newPassword}
             onChange={setNewPassword}
-            required
           />
 
           <Button
-            type="submit"
-            disabled={saving}
+            onClick={changePassword}
           >
-            {saving
-              ? "Updating..."
-              : "Update Password"}
+            Update Password
           </Button>
-        </form>
+        </div>
       </Card>
     </div>
   );
@@ -2693,52 +2616,34 @@ function SettingsPage({
 
 function TrainerDashboard({
   user,
-  setError,
 }: {
   user: User;
-  setError: (error: string) => void;
 }) {
   const [data, setData] =
     useState<any>(null);
 
-  const [topics, setTopics] =
-    useState<Topic[]>([]);
-
-  const [slots, setSlots] =
-    useState<Slot[]>([]);
-
-  const [start, setStart] =
-    useState("");
-
-  const [end, setEnd] =
-    useState("");
-
   const [loading, setLoading] =
     useState(true);
 
+  const [startTime, setStartTime] =
+    useState("");
+
+  const [endTime, setEndTime] =
+    useState("");
+
+  const [message, setMessage] =
+    useState("");
+
   async function load() {
     try {
-      const [
-        dashboard,
-        topicData,
-        slotData,
-      ] = await Promise.all([
-        api<any>(
+      const response =
+        await api<any>(
           `/trainers/${user.id}/dashboard`
-        ),
-        api<Topic[]>(
-          `/trainers/${user.id}/topics`
-        ),
-        api<Slot[]>(
-          `/trainers/${user.id}/slots`
-        ),
-      ]);
+        );
 
-      setData(dashboard);
-      setTopics(topicData);
-      setSlots(slotData);
-    } catch (err: any) {
-      setError(err.message);
+      setData(response);
+    } catch (err) {
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -2755,180 +2660,125 @@ function TrainerDashboard({
         {
           method: "POST",
           body: JSON.stringify({
-            start_time: start,
-            end_time: end,
+            start_time: startTime,
+            end_time: endTime,
           }),
         }
       );
 
-      setStart("");
-      setEnd("");
+      setStartTime("");
+      setEndTime("");
 
-      await load();
-    } catch (err: any) {
-      setError(err.message);
-    }
-  }
-
-  async function deleteSlot(
-    slotId: number
-  ) {
-    try {
-      await api(
-        `/trainers/${user.id}/slots/${slotId}`,
-        {
-          method: "DELETE",
-        }
+      setMessage(
+        "Slot added successfully."
       );
 
-      await load();
-    } catch (err: any) {
-      setError(err.message);
+      load();
+    } catch (err) {
+      setMessage(
+        err instanceof Error
+          ? err.message
+          : "Unable to add slot"
+      );
     }
   }
 
-  if (loading) return <Loading />;
+  if (loading) {
+    return <Loading />;
+  }
 
   return (
-    <div className="space-y-7">
-      <div>
-        <div className="text-sm font-bold uppercase text-indigo-600">
-          Trainer Area
-        </div>
-
-        <h1 className="mt-1 text-3xl font-black">
-          Trainer Dashboard
+    <div>
+      <div className="mb-8">
+        <h1 className="text-3xl font-black">
+          👨‍🏫 Trainer Dashboard
         </h1>
+
+        <p className="text-slate-500 mt-2">
+          Manage your students and lecture slots.
+        </p>
       </div>
 
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      {message && (
+        <div className="bg-green-50 text-green-700 rounded-xl p-4 mb-5">
+          {message}
+        </div>
+      )}
+
+      <div className="grid md:grid-cols-3 gap-5 mb-7">
         <Stat
-          icon="👥"
+          icon="👨‍🎓"
           title="Students"
           value={
-            data?.stats?.students ||
-            0
+            data?.stats?.students || 0
           }
-          onClick={() => {}}
         />
 
         <Stat
           icon="📅"
           title="Bookings"
           value={
-            data?.stats?.bookings ||
-            0
+            data?.stats?.bookings || 0
           }
-          onClick={() => {}}
         />
 
         <Stat
-          icon="📚"
-          title="Topics"
-          value={topics.length}
-          onClick={() => {}}
-        />
-
-        <Stat
-          icon="🕐"
-          title="Slots"
+          icon="📖"
+          title="Lectures"
           value={
-            slots.filter(
-              (s) => s.available
-            ).length
+            data?.stats?.lectures || 0
           }
-          onClick={() => {}}
         />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid lg:grid-cols-2 gap-6">
         <Card className="p-6">
-          <h2 className="text-xl font-black">
-            My Expertise
+          <h2 className="text-xl font-black mb-5">
+            ➕ Add Available Slot
           </h2>
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            {topics.map((topic) => (
-              <span
-                key={topic.id}
-                className="rounded-xl bg-indigo-50 px-3 py-2 text-sm font-bold text-indigo-700"
-              >
-                {topic.name}
-              </span>
-            ))}
-          </div>
-        </Card>
-
-        <Card className="p-6">
-          <h2 className="text-xl font-black">
-            Add Lecture Slot
-          </h2>
-
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="grid md:grid-cols-2 gap-4">
             <Input
-              label="Start"
-              value={start}
-              onChange={setStart}
+              label="Start Time"
+              value={startTime}
+              onChange={setStartTime}
               placeholder="10:00 AM"
             />
 
             <Input
-              label="End"
-              value={end}
-              onChange={setEnd}
+              label="End Time"
+              value={endTime}
+              onChange={setEndTime}
               placeholder="11:00 AM"
             />
           </div>
 
-          <div className="mt-4">
-            <Button
-              onClick={addSlot}
-            >
-              + Add Slot
+          <div className="mt-5">
+            <Button onClick={addSlot}>
+              Add Slot
             </Button>
           </div>
         </Card>
-      </div>
 
-      <Card className="p-6">
-        <h2 className="text-xl font-black">
-          My Slots
-        </h2>
+        <Card className="p-6">
+          <h2 className="text-xl font-black mb-5">
+            📚 My Expertise
+          </h2>
 
-        <div className="mt-5 space-y-3">
-          {slots.map((slot) => (
-            <div
-              key={slot.id}
-              className="flex flex-wrap justify-between gap-3 rounded-xl border p-4"
-            >
-              <div className="font-bold">
-                🕐{" "}
-                {slot.start_time} -{" "}
-                {slot.end_time}
-              </div>
-
-              <div className="flex gap-2">
-                <span className="rounded-lg bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
-                  {slot.available
-                    ? "Available"
-                    : "Booked"}
-                </span>
-
-                <Button
-                  variant="danger"
-                  onClick={() =>
-                    deleteSlot(
-                      slot.id
-                    )
-                  }
+          <div className="flex flex-wrap gap-2">
+            {data?.expertise?.map(
+              (topic: any) => (
+                <span
+                  key={topic.id}
+                  className="px-3 py-2 rounded-full bg-indigo-50 text-indigo-700 font-semibold"
                 >
-                  Delete
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
+                  {topic.name}
+                </span>
+              )
+            )}
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }
@@ -2937,11 +2787,7 @@ function TrainerDashboard({
    ADMIN
 ========================================================= */
 
-function AdminDashboard({
-  setError,
-}: {
-  setError: (error: string) => void;
-}) {
+function AdminDashboard() {
   const [data, setData] =
     useState<any>(null);
 
@@ -2951,69 +2797,89 @@ function AdminDashboard({
   useEffect(() => {
     api<any>("/admin/dashboard")
       .then(setData)
-      .catch((err) =>
-        setError(err.message)
-      )
-      .finally(() =>
-        setLoading(false)
-      );
-  }, [setError]);
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
 
-  if (loading) return <Loading />;
+  if (loading) {
+    return <Loading />;
+  }
 
   return (
-    <div className="space-y-7">
-      <div>
-        <div className="text-sm font-bold uppercase text-red-500">
-          Administration
-        </div>
-
-        <h1 className="mt-1 text-3xl font-black">
-          Admin Dashboard
+    <div>
+      <div className="mb-8">
+        <h1 className="text-3xl font-black">
+          ⚙️ Admin Dashboard
         </h1>
+
+        <p className="text-slate-500 mt-2">
+          SkillSphere platform overview.
+        </p>
       </div>
 
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid md:grid-cols-4 gap-5">
         <AdminStat
           icon="👥"
           title="Users"
-          value={
-            data?.users ||
-            data?.total_users ||
-            0
-          }
+          value={data?.users || 0}
         />
 
         <AdminStat
           icon="📚"
           title="Courses"
-          value={
-            data?.courses ||
-            data?.total_courses ||
-            0
-          }
+          value={data?.courses || 0}
         />
 
         <AdminStat
           icon="📝"
           title="Questions"
-          value={
-            data?.questions ||
-            data?.total_questions ||
-            0
-          }
+          value={data?.questions || 0}
         />
 
         <AdminStat
           icon="📅"
           title="Bookings"
-          value={
-            data?.bookings ||
-            data?.total_bookings ||
-            0
-          }
+          value={data?.bookings || 0}
         />
       </div>
+
+      <Card className="p-7 mt-7">
+        <h2 className="text-xl font-black mb-4">
+          Platform
+        </h2>
+
+        <div className="grid md:grid-cols-2 gap-4">
+          <div className="bg-indigo-50 rounded-xl p-5">
+            <div className="text-3xl">
+              🎯
+            </div>
+
+            <h3 className="font-black mt-2">
+              Competency Based Learning
+            </h3>
+
+            <p className="text-sm text-slate-600 mt-1">
+              Students are matched with trainers
+              based on weak topics.
+            </p>
+          </div>
+
+          <div className="bg-green-50 rounded-xl p-5">
+            <div className="text-3xl">
+              👨‍🏫
+            </div>
+
+            <h3 className="font-black mt-2">
+              Trainer Booking
+            </h3>
+
+            <p className="text-sm text-slate-600 mt-1">
+              Students can book trainers directly or
+              through diagnostic recommendations.
+            </p>
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }
@@ -3025,21 +2891,21 @@ function AdminStat({
 }: {
   icon: string;
   title: string;
-  value: React.ReactNode;
+  value: number;
 }) {
   return (
-    <Card className="p-5">
-      <div className="text-2xl">
+    <Card className="p-6">
+      <div className="text-3xl">
         {icon}
       </div>
 
-      <div className="mt-4 text-3xl font-black">
-        {value}
-      </div>
-
-      <div className="mt-1 text-sm text-slate-500">
+      <p className="text-sm text-slate-500 mt-3">
         {title}
-      </div>
+      </p>
+
+      <p className="text-3xl font-black">
+        {value}
+      </p>
     </Card>
   );
 }
