@@ -2,6 +2,10 @@ from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 
 
+# =========================
+# AUTH
+# =========================
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
@@ -15,6 +19,10 @@ class RegisterRequest(BaseModel):
     bio: Optional[str] = ""
 
 
+# =========================
+# TEST
+# =========================
+
 class TestAnswerItem(BaseModel):
     question_id: int
     answer: str
@@ -27,6 +35,10 @@ class TestSubmit(BaseModel):
     answers: List[TestAnswerItem]
 
 
+# =========================
+# BOOKING
+# =========================
+
 class BookingRequest(BaseModel):
     trainee_id: int
     trainer_id: int
@@ -34,11 +46,24 @@ class BookingRequest(BaseModel):
     topic_id: int
 
 
+# =========================
+# TRAINER SLOT
+# =========================
+
 class SlotCreate(BaseModel):
     start_time: str
     end_time: str
 
 
+# =========================
+# PROFILE
+# =========================
+
 class ProfileUpdate(BaseModel):
     name: str
     bio: Optional[str] = ""
+
+
+class PasswordUpdate(BaseModel):
+    current_password: str
+    new_password: str
