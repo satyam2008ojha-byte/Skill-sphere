@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 
 const API_URL = "https://skillsphere-backend-dcg2.onrender.com";
 
@@ -7,6 +8,7 @@ type Role = "trainee" | "trainer" | "admin";
 type Stage =
   | "landing"
   | "login"
+  | "register"
   | "courses"
   | "pretest"
   | "result"
@@ -22,6 +24,7 @@ type User = {
   name: string;
   email: string;
   role: Role;
+  bio?: string;
 };
 
 type Course = {
@@ -41,6 +44,7 @@ type TopicResult = {
   topic_id: number;
   topic: string;
   percentage: number;
+  weak?: boolean;
 };
 
 type WeakTopic = {
@@ -60,12 +64,13 @@ type Slot = {
   id: number;
   start_time: string;
   end_time: string;
+  available?: boolean;
 };
 
 type TestResult = {
   attempt_id: number;
   score: number;
-  weak_topics: WeakTopic[];
+  weak_topics?: WeakTopic[];
 };
 
 type DetailedResult = {
@@ -73,6 +78,34 @@ type DetailedResult = {
   test_type: string;
   score: number;
   topics: TopicResult[];
+};
+
+type TrainerTopic = {
+  id: number;
+  name: string;
+};
+
+type TrainerBooking = {
+  booking_id: number;
+  trainee_id: number;
+  trainee_name: string;
+  trainee_email: string;
+  topic: string;
+  status: string;
+  lecture_id: number | null;
+  lecture_status: string | null;
+};
+
+type TrainerDashboard = {
+  trainer: {
+    id: number;
+    name: string;
+    email: string;
+    bio: string;
+  };
+  topics: TrainerTopic[];
+  slots: Slot[];
+  bookings: TrainerBooking[];
 };
 
 /* =========================================================
@@ -144,7 +177,7 @@ function Button({
   secondary = false,
   disabled = false,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   onClick?: () => void;
   secondary?: boolean;
   disabled?: boolean;
@@ -176,7 +209,7 @@ function Card({
   children,
   className = "",
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
 }) {
   return (
@@ -206,7 +239,7 @@ function Header({
         SkillSphere
       </button>
 
-      <span className="text-sm text-gray-500">
+      <span className="text-sm text-gray-500 hidden sm:block">
         Skill-based Learning & Assessment
       </span>
     </header>
@@ -224,6 +257,8 @@ export default function App() {
   const [user, setUser] =
     useState<User | null>(null);
 
+  /* ---------------- LOGIN ---------------- */
+
   const [email, setEmail] =
     useState("");
 
@@ -233,8 +268,35 @@ export default function App() {
   const [loginError, setLoginError] =
     useState("");
 
+  /* ---------------- REGISTER ---------------- */
+
+  const [registerName, setRegisterName] =
+    useState("");
+
+  const [registerEmail, setRegisterEmail] =
+    useState("");
+
+  const [registerPhone, setRegisterPhone] =
+    useState("");
+
+  const [registerPassword, setRegisterPassword] =
+    useState("");
+
+  const [registerConfirmPassword, setRegisterConfirmPassword] =
+    useState("");
+
+  const [registerError, setRegisterError] =
+    useState("");
+
+  /* ---------------- COMMON ---------------- */
+
   const [loading, setLoading] =
     useState(false);
+
+  const [message, setMessage] =
+    useState("");
+
+  /* ---------------- TRAINEE ---------------- */
 
   const [courses, setCourses] =
     useState<Course[]>([]);
@@ -284,11 +346,25 @@ export default function App() {
   const [bookingId, setBookingId] =
     useState<number | null>(null);
 
-  const [message, setMessage] =
-    useState("");
-
   const [currentWeakTopic, setCurrentWeakTopic] =
     useState<WeakTopic | null>(null);
+
+  /* ---------------- TRAINER ---------------- */
+
+  const [trainerDashboard, setTrainerDashboard] =
+    useState<TrainerDashboard | null>(null);
+
+  const [trainerLoading, setTrainerLoading] =
+    useState(false);
+
+  const [newSlotStart, setNewSlotStart] =
+    useState("");
+
+  const [newSlotEnd, setNewSlotEnd] =
+    useState("");
+
+  const [trainerMessage, setTrainerMessage] =
+    useState("");
 
   /* =========================================================
      LOAD COURSES
@@ -337,11 +413,6 @@ export default function App() {
       setLoginError("");
       setMessage("");
 
-      console.log(
-        "LOGIN EMAIL:",
-        cleanEmail
-      );
-
       const data = await apiRequest(
         "/auth/login",
         {
@@ -353,11 +424,6 @@ export default function App() {
         }
       );
 
-      console.log(
-        "LOGIN SUCCESS:",
-        data
-      );
-
       setUser(data);
 
       if (data.role === "trainee") {
@@ -367,6 +433,9 @@ export default function App() {
         data.role === "trainer"
       ) {
         setStage("trainer");
+        await loadTrainerDashboard(
+          data.id
+        );
       } else if (
         data.role === "admin"
       ) {
@@ -389,6 +458,140 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  /* =========================================================
+     REGISTER
+  ========================================================= */
+
+  const handleRegister = async () => {
+    setRegisterError("");
+    setMessage("");
+
+    const name =
+      registerName.trim();
+
+    const cleanEmail =
+      registerEmail.trim().toLowerCase();
+
+    const cleanPhone =
+      registerPhone.trim();
+
+    if (!name) {
+      setRegisterError(
+        "Please enter your name."
+      );
+      return;
+    }
+
+    if (!cleanEmail) {
+      setRegisterError(
+        "Please enter your email."
+      );
+      return;
+    }
+
+    if (!registerPassword) {
+      setRegisterError(
+        "Please enter a password."
+      );
+      return;
+    }
+
+    if (registerPassword.length < 6) {
+      setRegisterError(
+        "Password must be at least 6 characters."
+      );
+      return;
+    }
+
+    if (
+      registerPassword !==
+      registerConfirmPassword
+    ) {
+      setRegisterError(
+        "Passwords do not match."
+      );
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const data = await apiRequest(
+        "/auth/register",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            email: cleanEmail,
+            password:
+              registerPassword,
+            phone: cleanPhone,
+          }),
+        }
+      );
+
+      setUser(data);
+
+      setRegisterName("");
+      setRegisterEmail("");
+      setRegisterPhone("");
+      setRegisterPassword("");
+      setRegisterConfirmPassword("");
+
+      await loadCourses();
+
+      setStage("courses");
+    } catch (error: any) {
+      console.error(
+        "REGISTER ERROR:",
+        error
+      );
+
+      setRegisterError(
+        error?.message ||
+          "Registration failed."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /* =========================================================
+     LOGOUT
+  ========================================================= */
+
+  const logout = () => {
+    setUser(null);
+
+    setEmail("");
+    setPassword("");
+
+    setLoginError("");
+    setRegisterError("");
+    setMessage("");
+
+    setTrainerDashboard(null);
+
+    setCourse(null);
+    setQuestions([]);
+
+    setAnswers({});
+    setPostAnswers({});
+
+    setPreTopicResults([]);
+    setPostTopicResults([]);
+
+    setWeakTopics([]);
+
+    setSelectedTrainer(null);
+    setSelectedSlot(null);
+
+    setLectureId(null);
+    setBookingId(null);
+
+    setStage("landing");
   };
 
   /* =========================================================
@@ -473,7 +676,9 @@ export default function App() {
         questions.map((question) => ({
           question_id: question.id,
           answer:
-            currentAnswers[question.id],
+            currentAnswers[
+              question.id
+            ],
         }));
 
       const data: TestResult =
@@ -495,26 +700,21 @@ export default function App() {
       if (testType === "pre") {
         setPreScore(data.score);
 
-        setWeakTopics(
-          data.weak_topics.map(
-            (item: WeakTopic) => {
-              const matchingTopic =
-                detailed.topics.find(
-                  (topic) =>
-                    topic.topic_id ===
-                    item.topic_id
-                );
+        const weak =
+          detailed.topics
+            .filter(
+              (topic) =>
+                topic.percentage < 70
+            )
+            .map((topic) => ({
+              topic_id:
+                topic.topic_id,
+              topic: topic.topic,
+              percentage:
+                topic.percentage,
+            }));
 
-              return {
-                ...item,
-                topic:
-                  matchingTopic?.topic ||
-                  item.topic ||
-                  "Unknown Topic",
-              };
-            }
-          )
-        );
+        setWeakTopics(weak);
 
         setPreTopicResults(
           detailed.topics
@@ -682,6 +882,163 @@ export default function App() {
   };
 
   /* =========================================================
+     LOAD TRAINER DASHBOARD
+  ========================================================= */
+
+  const loadTrainerDashboard =
+    async (trainerId?: number) => {
+      const id =
+        trainerId || user?.id;
+
+      if (!id) return;
+
+      try {
+        setTrainerLoading(true);
+        setTrainerMessage("");
+
+        const data =
+          await apiRequest(
+            `/trainer/${id}/dashboard`
+          );
+
+        setTrainerDashboard(data);
+      } catch (error: any) {
+        console.error(
+          "TRAINER DASHBOARD ERROR:",
+          error
+        );
+
+        setTrainerMessage(
+          error?.message ||
+            "Unable to load trainer dashboard."
+        );
+      } finally {
+        setTrainerLoading(false);
+      }
+    };
+
+  /* =========================================================
+     ADD TRAINER SLOT
+  ========================================================= */
+
+  const addTrainerSlot =
+    async () => {
+      if (!user) return;
+
+      if (
+        !newSlotStart ||
+        !newSlotEnd
+      ) {
+        setTrainerMessage(
+          "Please select start and end time."
+        );
+        return;
+      }
+
+      try {
+        setTrainerLoading(true);
+        setTrainerMessage("");
+
+        await apiRequest(
+          `/trainer/${user.id}/slots?start_time=${encodeURIComponent(
+            newSlotStart
+          )}&end_time=${encodeURIComponent(
+            newSlotEnd
+          )}`,
+          {
+            method: "POST",
+          }
+        );
+
+        setNewSlotStart("");
+        setNewSlotEnd("");
+
+        await loadTrainerDashboard(
+          user.id
+        );
+      } catch (error: any) {
+        console.error(error);
+
+        setTrainerMessage(
+          error?.message ||
+            "Unable to add slot."
+        );
+      } finally {
+        setTrainerLoading(false);
+      }
+    };
+
+  /* =========================================================
+     DELETE TRAINER SLOT
+  ========================================================= */
+
+  const deleteTrainerSlot =
+    async (slotId: number) => {
+      if (!user) return;
+
+      try {
+        setTrainerLoading(true);
+        setTrainerMessage("");
+
+        await apiRequest(
+          `/trainer/${user.id}/slots/${slotId}`,
+          {
+            method: "DELETE",
+          }
+        );
+
+        await loadTrainerDashboard(
+          user.id
+        );
+      } catch (error: any) {
+        console.error(error);
+
+        setTrainerMessage(
+          error?.message ||
+            "Unable to delete slot."
+        );
+      } finally {
+        setTrainerLoading(false);
+      }
+    };
+
+  /* =========================================================
+     COMPLETE TRAINER LECTURE
+  ========================================================= */
+
+  const trainerCompleteLecture =
+    async (
+      lectureId: number
+    ) => {
+      try {
+        setTrainerLoading(true);
+        setTrainerMessage("");
+
+        await apiRequest(
+          `/lectures/${lectureId}/complete`,
+          {
+            method: "POST",
+          }
+        );
+
+        if (user) {
+          await loadTrainerDashboard(
+            user.id
+          );
+        }
+      } catch (error: any) {
+        console.error(error);
+
+        setTrainerMessage(
+          error?.message ||
+            "Unable to complete lecture."
+        );
+      } finally {
+        setTrainerLoading(false);
+      }
+    };
+
+  /* =========================================================
      TOPIC IMPROVEMENT
   ========================================================= */
 
@@ -792,6 +1149,7 @@ export default function App() {
 
     return (
       <div className="min-h-screen bg-[#F5F7FA]">
+
         <Header
           onHome={() =>
             setStage("landing")
@@ -803,6 +1161,7 @@ export default function App() {
           <div className="flex justify-between mb-5">
 
             <div>
+
               <p className="text-sm text-gray-500">
                 {isPost
                   ? "Post-Test"
@@ -815,6 +1174,7 @@ export default function App() {
                 {index + 1} of{" "}
                 {questions.length}
               </h2>
+
             </div>
 
             <span className="px-3 py-2 bg-blue-50 text-[#1F5F95] rounded-lg text-sm font-medium">
@@ -958,6 +1318,7 @@ export default function App() {
           </div>
 
         </main>
+
       </div>
     );
   };
@@ -1000,14 +1361,23 @@ export default function App() {
               improvement.
             </p>
 
-            <div className="mt-7">
+            <div className="mt-7 flex gap-3">
 
               <Button
                 onClick={() =>
                   setStage("login")
                 }
               >
-                Get Started →
+                Login →
+              </Button>
+
+              <Button
+                secondary
+                onClick={() =>
+                  setStage("register")
+                }
+              >
+                Create Account
               </Button>
 
             </div>
@@ -1031,7 +1401,7 @@ export default function App() {
                 [
                   "02",
                   "Pre-Test",
-                  "Solve 15 MCQs mapped to specific topics.",
+                  "Solve MCQs mapped to specific topics.",
                 ],
                 [
                   "03",
@@ -1181,6 +1551,16 @@ export default function App() {
                   : "Login"}
               </Button>
 
+              <button
+                onClick={() => {
+                  setRegisterError("");
+                  setStage("register");
+                }}
+                className="w-full border border-[#1F5F95] text-[#1F5F95] rounded-lg px-4 py-3 font-medium hover:bg-blue-50"
+              >
+                Create New Account
+              </button>
+
             </div>
 
             <div className="mt-6 p-4 bg-blue-50 rounded-lg text-sm">
@@ -1191,6 +1571,18 @@ export default function App() {
 
               <p>
                 trainee@skillsphere.com
+              </p>
+
+              <p>
+                Password: 123456
+              </p>
+
+              <p className="mt-3 font-semibold">
+                Demo Trainer
+              </p>
+
+              <p>
+                aarav@skillsphere.com
               </p>
 
               <p>
@@ -1208,10 +1600,10 @@ export default function App() {
   }
 
   /* =========================================================
-     COURSES
+     REGISTER
   ========================================================= */
 
-  if (stage === "courses") {
+  if (stage === "register") {
     return (
       <div className="min-h-screen bg-[#F5F7FA]">
 
@@ -1220,6 +1612,227 @@ export default function App() {
             setStage("landing")
           }
         />
+
+        <div className="max-w-md mx-auto py-10 px-4">
+
+          <Card className="p-8">
+
+            <div className="text-center">
+
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-blue-50 flex items-center justify-center text-2xl">
+                🎓
+              </div>
+
+              <h1 className="text-3xl font-bold mt-4">
+                Create Account
+              </h1>
+
+              <p className="text-gray-500 mt-2">
+                Start your personalized
+                learning journey.
+              </p>
+
+            </div>
+
+            {registerError && (
+              <div className="mt-5 p-3 rounded-lg bg-red-50 text-red-700 text-sm">
+                {registerError}
+              </div>
+            )}
+
+            <div className="mt-6 space-y-4">
+
+              <div>
+
+                <label className="block text-sm font-medium mb-1">
+                  Full Name
+                </label>
+
+                <input
+                  type="text"
+                  value={registerName}
+                  onChange={(e) =>
+                    setRegisterName(
+                      e.target.value
+                    )
+                  }
+                  placeholder="Enter your full name"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-3 outline-none focus:border-[#1F5F95]"
+                />
+
+              </div>
+
+              <div>
+
+                <label className="block text-sm font-medium mb-1">
+                  Email
+                </label>
+
+                <input
+                  type="email"
+                  value={registerEmail}
+                  onChange={(e) =>
+                    setRegisterEmail(
+                      e.target.value
+                    )
+                  }
+                  placeholder="you@example.com"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-3 outline-none focus:border-[#1F5F95]"
+                />
+
+              </div>
+
+              <div>
+
+                <label className="block text-sm font-medium mb-1">
+                  Phone Number
+                  <span className="text-gray-400">
+                    {" "}
+                    (optional)
+                  </span>
+                </label>
+
+                <input
+                  type="tel"
+                  value={registerPhone}
+                  onChange={(e) =>
+                    setRegisterPhone(
+                      e.target.value
+                    )
+                  }
+                  placeholder="+91 XXXXX XXXXX"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-3 outline-none focus:border-[#1F5F95]"
+                />
+
+              </div>
+
+              <div>
+
+                <label className="block text-sm font-medium mb-1">
+                  Password
+                </label>
+
+                <input
+                  type="password"
+                  value={registerPassword}
+                  onChange={(e) =>
+                    setRegisterPassword(
+                      e.target.value
+                    )
+                  }
+                  placeholder="Minimum 6 characters"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-3 outline-none focus:border-[#1F5F95]"
+                />
+
+              </div>
+
+              <div>
+
+                <label className="block text-sm font-medium mb-1">
+                  Confirm Password
+                </label>
+
+                <input
+                  type="password"
+                  value={
+                    registerConfirmPassword
+                  }
+                  onChange={(e) =>
+                    setRegisterConfirmPassword(
+                      e.target.value
+                    )
+                  }
+                  placeholder="Re-enter password"
+                  onKeyDown={(e) => {
+                    if (
+                      e.key === "Enter"
+                    ) {
+                      handleRegister();
+                    }
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-4 py-3 outline-none focus:border-[#1F5F95]"
+                />
+
+              </div>
+
+              <Button
+                disabled={loading}
+                onClick={
+                  handleRegister
+                }
+              >
+                {loading
+                  ? "Creating Account..."
+                  : "Create Account"}
+              </Button>
+
+              <button
+                onClick={() =>
+                  setStage("login")
+                }
+                className="w-full border border-gray-300 rounded-lg px-4 py-3 font-medium text-gray-700 hover:bg-gray-50"
+              >
+                ← Back to Login
+              </button>
+
+            </div>
+
+            <p className="text-xs text-gray-400 text-center mt-6">
+              New accounts are registered
+              as trainee accounts.
+            </p>
+
+          </Card>
+
+        </div>
+
+      </div>
+    );
+  }
+
+  /* =========================================================
+     COURSES / TRAINEE DASHBOARD
+  ========================================================= */
+
+  if (stage === "courses") {
+    return (
+      <div className="min-h-screen bg-[#F5F7FA]">
+
+        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6">
+
+          <button
+            onClick={() =>
+              setStage("landing")
+            }
+            className="text-xl font-bold text-[#1F5F95]"
+          >
+            SkillSphere
+          </button>
+
+          <div className="flex items-center gap-4">
+
+            <div className="hidden sm:block text-right">
+
+              <p className="text-sm font-semibold">
+                {user?.name}
+              </p>
+
+              <p className="text-xs text-gray-500">
+                Trainee
+              </p>
+
+            </div>
+
+            <button
+              onClick={logout}
+              className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium hover:bg-gray-50"
+            >
+              Logout
+            </button>
+
+          </div>
+
+        </header>
 
         <main className="max-w-6xl mx-auto p-6">
 
@@ -1272,7 +1885,7 @@ export default function App() {
                   </p>
 
                   <div className="text-sm text-gray-500 mt-5 mb-4">
-                    15 MCQs • Topic-wise
+                    MCQs • Topic-wise
                     analysis
                   </div>
 
@@ -1463,7 +2076,7 @@ export default function App() {
                       key={
                         topic.topic_id
                       }
-                      className="border rounded-lg p-4 flex items-center justify-between"
+                      className="border rounded-lg p-4 flex items-center justify-between gap-4"
                     >
 
                       <div>
@@ -1920,7 +2533,7 @@ export default function App() {
 
             </div>
 
-            <div className="mt-7 flex gap-3">
+            <div className="mt-7 flex gap-3 flex-wrap">
 
               <Button
                 onClick={() => {
@@ -1934,11 +2547,9 @@ export default function App() {
 
               <Button
                 secondary
-                onClick={() =>
-                  setStage("landing")
-                }
+                onClick={logout}
               >
-                Back to Home
+                Logout
               </Button>
 
             </div>
@@ -1952,63 +2563,722 @@ export default function App() {
   }
 
   /* =========================================================
-     TRAINER
+     TRAINER DASHBOARD
   ========================================================= */
 
   if (stage === "trainer") {
     return (
       <div className="min-h-screen bg-[#F5F7FA]">
 
-        <Header
-          onHome={() =>
-            setStage("landing")
-          }
-        />
+        {/* Trainer Header */}
 
-        <main className="max-w-5xl mx-auto p-6">
+        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6">
 
-          <h1 className="text-3xl font-bold">
-            Trainer Dashboard
-          </h1>
+          <div>
 
-          <p className="text-gray-500 mt-1">
-            Welcome, {user?.name}
-          </p>
+            <button
+              onClick={() =>
+                setStage("landing")
+              }
+              className="text-xl font-bold text-[#1F5F95]"
+            >
+              SkillSphere
+            </button>
 
-          <Card className="p-7 mt-6">
+            <span className="hidden md:inline text-sm text-gray-400 ml-3">
+              / Trainer Dashboard
+            </span>
 
-            <h2 className="text-xl font-bold">
-              SkillSphere Trainer
-            </h2>
+          </div>
 
-            <p className="text-gray-600 mt-3">
-              Your trainer account is
-              active. Trainer expertise
-              and available lecture
-              slots are managed through
-              the SkillSphere backend.
-            </p>
+          <div className="flex items-center gap-4">
 
-            <div className="mt-6 p-4 bg-blue-50 rounded-lg">
+            <div className="hidden sm:block text-right">
 
-              <p>
-                <b>Name:</b>{" "}
+              <p className="text-sm font-semibold">
                 {user?.name}
               </p>
 
-              <p>
-                <b>Email:</b>{" "}
-                {user?.email}
-              </p>
-
-              <p>
-                <b>Role:</b>{" "}
-                {user?.role}
+              <p className="text-xs text-gray-500">
+                Trainer
               </p>
 
             </div>
 
-          </Card>
+            <button
+              onClick={logout}
+              className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium hover:bg-gray-50"
+            >
+              Logout
+            </button>
+
+          </div>
+
+        </header>
+
+        <main className="max-w-7xl mx-auto p-6">
+
+          {/* Title */}
+
+          <div className="mb-7">
+
+            <p className="text-sm font-semibold text-[#1F5F95]">
+              TRAINER PORTAL
+            </p>
+
+            <h1 className="text-3xl font-bold mt-1">
+              Welcome,{" "}
+              {trainerDashboard?.trainer
+                ?.name ||
+                user?.name}
+            </h1>
+
+            <p className="text-gray-500 mt-1">
+              Manage your expertise,
+              lecture slots and trainee
+              sessions.
+            </p>
+
+          </div>
+
+          {/* Error / message */}
+
+          {trainerMessage && (
+            <div className="mb-5 p-4 rounded-xl bg-red-50 text-red-700">
+              {trainerMessage}
+            </div>
+          )}
+
+          {trainerLoading &&
+            !trainerDashboard && (
+              <Card className="p-10 text-center">
+                <p className="text-gray-500">
+                  Loading trainer dashboard...
+                </p>
+              </Card>
+            )}
+
+          {trainerDashboard && (
+            <>
+
+              {/* =======================
+                  STATS
+              ======================== */}
+
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+
+                <Card className="p-6">
+
+                  <div className="flex items-center justify-between">
+
+                    <div>
+
+                      <p className="text-sm text-gray-500">
+                        My Topics
+                      </p>
+
+                      <p className="text-3xl font-bold mt-2">
+                        {
+                          trainerDashboard
+                            .topics
+                            .length
+                        }
+                      </p>
+
+                    </div>
+
+                    <div className="w-11 h-11 rounded-xl bg-blue-50 flex items-center justify-center text-xl">
+                      📚
+                    </div>
+
+                  </div>
+
+                </Card>
+
+                <Card className="p-6">
+
+                  <div className="flex items-center justify-between">
+
+                    <div>
+
+                      <p className="text-sm text-gray-500">
+                        Total Slots
+                      </p>
+
+                      <p className="text-3xl font-bold mt-2">
+                        {
+                          trainerDashboard
+                            .slots
+                            .length
+                        }
+                      </p>
+
+                    </div>
+
+                    <div className="w-11 h-11 rounded-xl bg-purple-50 flex items-center justify-center text-xl">
+                      🕐
+                    </div>
+
+                  </div>
+
+                </Card>
+
+                <Card className="p-6">
+
+                  <div className="flex items-center justify-between">
+
+                    <div>
+
+                      <p className="text-sm text-gray-500">
+                        Available Slots
+                      </p>
+
+                      <p className="text-3xl font-bold mt-2">
+                        {
+                          trainerDashboard
+                            .slots
+                            .filter(
+                              (slot) =>
+                                slot.available
+                            )
+                            .length
+                        }
+                      </p>
+
+                    </div>
+
+                    <div className="w-11 h-11 rounded-xl bg-green-50 flex items-center justify-center text-xl">
+                      ✓
+                    </div>
+
+                  </div>
+
+                </Card>
+
+                <Card className="p-6">
+
+                  <div className="flex items-center justify-between">
+
+                    <div>
+
+                      <p className="text-sm text-gray-500">
+                        Trainee Bookings
+                      </p>
+
+                      <p className="text-3xl font-bold mt-2">
+                        {
+                          trainerDashboard
+                            .bookings
+                            .length
+                        }
+                      </p>
+
+                    </div>
+
+                    <div className="w-11 h-11 rounded-xl bg-orange-50 flex items-center justify-center text-xl">
+                      👨‍🎓
+                    </div>
+
+                  </div>
+
+                </Card>
+
+              </div>
+
+
+              {/* =======================
+                  PROFILE
+              ======================== */}
+
+              <Card className="p-7 mt-6">
+
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+
+                  <div>
+
+                    <p className="text-sm font-semibold text-[#1F5F95]">
+                      TRAINER PROFILE
+                    </p>
+
+                    <h2 className="text-2xl font-bold mt-1">
+                      {
+                        trainerDashboard
+                          .trainer
+                          .name
+                      }
+                    </h2>
+
+                    <p className="text-gray-500 mt-1">
+                      {
+                        trainerDashboard
+                          .trainer
+                          .email
+                      }
+                    </p>
+
+                  </div>
+
+                  <span className="w-fit px-3 py-1 rounded-full bg-green-50 text-green-700 text-sm font-semibold">
+                    Active Trainer
+                  </span>
+
+                </div>
+
+                <div className="mt-5 p-5 bg-gray-50 rounded-xl">
+
+                  <p className="text-sm text-gray-500">
+                    About
+                  </p>
+
+                  <p className="mt-2 text-gray-700">
+                    {
+                      trainerDashboard
+                        .trainer
+                        .bio ||
+                      "No trainer bio added yet."
+                    }
+                  </p>
+
+                </div>
+
+              </Card>
+
+
+              {/* =======================
+                  TOPICS
+              ======================== */}
+
+              <Card className="p-7 mt-6">
+
+                <div className="flex items-center justify-between">
+
+                  <div>
+
+                    <h2 className="text-xl font-bold">
+                      My Expertise
+                    </h2>
+
+                    <p className="text-gray-500 text-sm mt-1">
+                      Topics assigned to you.
+                    </p>
+
+                  </div>
+
+                  <span className="text-sm text-gray-500">
+                    {
+                      trainerDashboard
+                        .topics
+                        .length
+                    }{" "}
+                    topics
+                  </span>
+
+                </div>
+
+                {trainerDashboard
+                  .topics.length ===
+                0 ? (
+
+                  <div className="mt-5 p-5 rounded-xl bg-gray-50 text-center text-gray-500">
+                    No topics assigned yet.
+                  </div>
+
+                ) : (
+
+                  <div className="mt-5 flex flex-wrap gap-3">
+
+                    {trainerDashboard
+                      .topics
+                      .map(
+                        (topic) => (
+
+                          <div
+                            key={
+                              topic.id
+                            }
+                            className="px-4 py-3 rounded-xl bg-blue-50 text-[#1F5F95] font-medium border border-blue-100"
+                          >
+                            📘{" "}
+                            {topic.name}
+                          </div>
+
+                        )
+                      )}
+
+                  </div>
+
+                )}
+
+              </Card>
+
+
+              {/* =======================
+                  ADD SLOT
+              ======================== */}
+
+              <Card className="p-7 mt-6">
+
+                <h2 className="text-xl font-bold">
+                  Add Lecture Slot
+                </h2>
+
+                <p className="text-gray-500 text-sm mt-1">
+                  Create a time slot that
+                  trainees can book.
+                </p>
+
+                <div className="mt-5 flex flex-col md:flex-row gap-3">
+
+                  <div className="flex-1">
+
+                    <label className="block text-sm font-medium mb-1">
+                      Start Time
+                    </label>
+
+                    <input
+                      type="datetime-local"
+                      value={
+                        newSlotStart
+                      }
+                      onChange={(e) =>
+                        setNewSlotStart(
+                          e.target.value
+                        )
+                      }
+                      className="w-full border border-gray-300 rounded-lg px-4 py-3 outline-none focus:border-[#1F5F95]"
+                    />
+
+                  </div>
+
+                  <div className="flex-1">
+
+                    <label className="block text-sm font-medium mb-1">
+                      End Time
+                    </label>
+
+                    <input
+                      type="datetime-local"
+                      value={
+                        newSlotEnd
+                      }
+                      onChange={(e) =>
+                        setNewSlotEnd(
+                          e.target.value
+                        )
+                      }
+                      className="w-full border border-gray-300 rounded-lg px-4 py-3 outline-none focus:border-[#1F5F95]"
+                    />
+
+                  </div>
+
+                  <div className="md:self-end">
+
+                    <Button
+                      disabled={
+                        trainerLoading
+                      }
+                      onClick={
+                        addTrainerSlot
+                      }
+                    >
+                      {trainerLoading
+                        ? "Adding..."
+                        : "+ Add Slot"}
+                    </Button>
+
+                  </div>
+
+                </div>
+
+              </Card>
+
+
+              {/* =======================
+                  MY SLOTS
+              ======================== */}
+
+              <Card className="p-7 mt-6">
+
+                <div className="flex items-center justify-between">
+
+                  <div>
+
+                    <h2 className="text-xl font-bold">
+                      My Lecture Slots
+                    </h2>
+
+                    <p className="text-gray-500 text-sm mt-1">
+                      Manage your available
+                      teaching sessions.
+                    </p>
+
+                  </div>
+
+                  <button
+                    onClick={() =>
+                      loadTrainerDashboard()
+                    }
+                    className="text-sm text-[#1F5F95] font-medium hover:underline"
+                  >
+                    Refresh
+                  </button>
+
+                </div>
+
+                {trainerDashboard
+                  .slots.length ===
+                0 ? (
+
+                  <div className="mt-5 p-6 rounded-xl bg-gray-50 text-center text-gray-500">
+                    No lecture slots created.
+                  </div>
+
+                ) : (
+
+                  <div className="mt-5 grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+
+                    {trainerDashboard
+                      .slots
+                      .map(
+                        (slot) => (
+
+                          <div
+                            key={
+                              slot.id
+                            }
+                            className="border border-gray-200 rounded-xl p-5"
+                          >
+
+                            <div className="flex justify-between items-center">
+
+                              <span className="font-semibold">
+                                {slot.start_time}
+                              </span>
+
+                              <span className="text-gray-400">
+                                →
+                              </span>
+
+                              <span className="font-semibold">
+                                {slot.end_time}
+                              </span>
+
+                            </div>
+
+                            <div className="mt-4 flex items-center justify-between">
+
+                              <span
+                                className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                                  slot.available
+                                    ? "bg-green-50 text-green-700"
+                                    : "bg-red-50 text-red-700"
+                                }`}
+                              >
+                                {slot.available
+                                  ? "Available"
+                                  : "Booked"}
+                              </span>
+
+                              {slot.available && (
+
+                                <button
+                                  onClick={() =>
+                                    deleteTrainerSlot(
+                                      slot.id
+                                    )
+                                  }
+                                  className="text-sm text-red-600 hover:underline"
+                                >
+                                  Delete
+                                </button>
+
+                              )}
+
+                            </div>
+
+                          </div>
+
+                        )
+                      )}
+
+                  </div>
+
+                )}
+
+              </Card>
+
+
+              {/* =======================
+                  TRAINEE BOOKINGS
+              ======================== */}
+
+              <Card className="p-7 mt-6">
+
+                <div>
+
+                  <h2 className="text-xl font-bold">
+                    Trainee Bookings
+                  </h2>
+
+                  <p className="text-gray-500 text-sm mt-1">
+                    Manage trainees who booked
+                    your sessions.
+                  </p>
+
+                </div>
+
+                {trainerDashboard
+                  .bookings.length ===
+                0 ? (
+
+                  <div className="mt-5 p-8 rounded-xl bg-gray-50 text-center">
+
+                    <div className="text-3xl">
+                      📅
+                    </div>
+
+                    <p className="font-medium mt-3">
+                      No bookings yet
+                    </p>
+
+                    <p className="text-sm text-gray-500 mt-1">
+                      Trainee bookings will
+                      appear here.
+                    </p>
+
+                  </div>
+
+                ) : (
+
+                  <div className="mt-5 space-y-4">
+
+                    {trainerDashboard
+                      .bookings
+                      .map(
+                        (booking) => (
+
+                          <div
+                            key={
+                              booking.booking_id
+                            }
+                            className="border border-gray-200 rounded-xl p-5"
+                          >
+
+                            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+
+                              <div className="flex items-start gap-4">
+
+                                <div className="w-11 h-11 rounded-xl bg-blue-50 flex items-center justify-center text-lg">
+                                  👨‍🎓
+                                </div>
+
+                                <div>
+
+                                  <h3 className="font-bold text-lg">
+                                    {
+                                      booking.trainee_name
+                                    }
+                                  </h3>
+
+                                  <p className="text-sm text-gray-500">
+                                    {
+                                      booking.trainee_email
+                                    }
+                                  </p>
+
+                                  <p className="text-sm mt-2">
+                                    Topic:{" "}
+                                    <span className="font-semibold">
+                                      {
+                                        booking.topic
+                                      }
+                                    </span>
+                                  </p>
+
+                                </div>
+
+                              </div>
+
+                              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+
+                                <span
+                                  className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                                    booking.status ===
+                                    "completed"
+                                      ? "bg-green-50 text-green-700"
+                                      : "bg-blue-50 text-blue-700"
+                                  }`}
+                                >
+                                  {
+                                    booking.status
+                                  }
+                                </span>
+
+                                <span
+                                  className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                                    booking.lecture_status ===
+                                    "completed"
+                                      ? "bg-green-50 text-green-700"
+                                      : "bg-yellow-50 text-yellow-700"
+                                  }`}
+                                >
+                                  Lecture:{" "}
+                                  {
+                                    booking.lecture_status
+                                  }
+                                </span>
+
+                              </div>
+
+                            </div>
+
+                            {booking.lecture_id &&
+                              booking.lecture_status !==
+                                "completed" && (
+
+                              <div className="mt-5 pt-5 border-t">
+
+                                <Button
+                                  disabled={
+                                    trainerLoading
+                                  }
+                                  onClick={() =>
+                                    trainerCompleteLecture(
+                                      booking.lecture_id!
+                                    )
+                                  }
+                                >
+                                  {trainerLoading
+                                    ? "Updating..."
+                                    : "✓ Mark Lecture Complete"}
+                                </Button>
+
+                              </div>
+
+                            )}
+
+                            {booking.lecture_status ===
+                              "completed" && (
+
+                              <div className="mt-5 pt-5 border-t text-sm text-green-700 font-medium">
+                                ✓ Lecture completed
+                              </div>
+
+                            )}
+
+                          </div>
+
+                        )
+                      )}
+
+                  </div>
+
+                )}
+
+              </Card>
+
+            </>
+          )}
 
         </main>
 
@@ -2024,15 +3294,33 @@ export default function App() {
     return (
       <div className="min-h-screen bg-[#F5F7FA]">
 
-        <Header
-          onHome={() =>
-            setStage("landing")
-          }
-        />
+        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6">
+
+          <button
+            onClick={() =>
+              setStage("landing")
+            }
+            className="text-xl font-bold text-[#1F5F95]"
+          >
+            SkillSphere
+          </button>
+
+          <button
+            onClick={logout}
+            className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium hover:bg-gray-50"
+          >
+            Logout
+          </button>
+
+        </header>
 
         <main className="max-w-5xl mx-auto p-6">
 
-          <h1 className="text-3xl font-bold">
+          <p className="text-sm font-semibold text-[#1F5F95]">
+            ADMIN PORTAL
+          </p>
+
+          <h1 className="text-3xl font-bold mt-1">
             Admin Dashboard
           </h1>
 
@@ -2043,14 +3331,14 @@ export default function App() {
               <b>{user?.name}</b>.
             </p>
 
-            <div className="mt-5 p-4 bg-blue-50 rounded-lg">
+            <div className="mt-5 p-5 bg-blue-50 rounded-lg">
 
               <p>
                 <b>Email:</b>{" "}
                 {user?.email}
               </p>
 
-              <p>
+              <p className="mt-2">
                 <b>Role:</b>{" "}
                 {user?.role}
               </p>
